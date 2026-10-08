@@ -51,13 +51,13 @@ which may batch their masks through OpenGPU.
 
 ## 5. OS 3.2.3 integration
 
-OpenFont will provide direct APIs to modern applications and a compatibility
-patch for selected public graphics.library text functions. Patches use
-SetFunction(), preserve original entry points and chain any unsupported case.
-No private OS structures are modified.
+OpenFont patches **nothing** in AmigaOS.
 
-Compatibility mode preserves classic bitmap-font measurements unless the
-caller opts into OpenFont metrics, avoiding layout changes in old applications.
+OpenGfx is the sole owner of the four Open-stack `graphics.library` patches: `Text`, `RectFill`, `BltBitMap` and `ScrollRaster`.
+
+When the OpenGfx `Text` patch runs, it calls OpenFont for shaping, metrics and cached MONO1/A8/RGBA glyph data, then OpenGfx performs the actual drawing. OpenFont never installs a `Text`, `TextLength`, `TextExtent` or `TextFit` patch.
+
+Modern applications call OpenFont directly when they need shaped measurement. Classic measurement calls remain OS-owned.
 
 ## 6. Testing
 
