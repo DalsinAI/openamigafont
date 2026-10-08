@@ -23,7 +23,7 @@ OpenBrowser / OpenWrite / OpenLayout / native applications
                      OpenGfx
                          |
                      OpenGPU
-             68040 | AC090 | host GPU
+               68040 | AC090 | GPU
 ```
 
 OpenFont owns text semantics. OpenGfx paints positioned glyph runs. OpenGPU is
