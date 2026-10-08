@@ -9,11 +9,12 @@ extern "C" {
 #endif
 
 #define OF_VERSION_MAJOR 0
-#define OF_VERSION_MINOR 1
+#define OF_VERSION_MINOR 2
 #define OF_VERSION_PATCH 0
 
 typedef struct OFContext OFContext;
 typedef struct OFFace OFFace;
+typedef struct OFCache OFCache;
 
 typedef struct OFGlyph {
     uint32_t glyph_id;
@@ -41,7 +42,8 @@ enum {
     OF_ERR_IO = -3,
     OF_ERR_FONT = -4,
     OF_ERR_RANGE = -5,
-    OF_ERR_BUFFER = -6
+    OF_ERR_BUFFER = -6,
+    OF_ERR_CACHE = -7
 };
 
 OFContext *of_context_create(void);
@@ -58,9 +60,21 @@ int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes);
 int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out);
 void of_bitmap_release(OFBitmap *bitmap);
 
+uint64_t of_face_source_fingerprint(const OFFace *face);
+
 int of_compile_cache(OFFace *face, const char *path,
                      const uint16_t *sizes, size_t size_count,
                      uint32_t first_codepoint, uint32_t last_codepoint);
+
+OFCache *of_cache_open(const char *path);
+void of_cache_close(OFCache *cache);
+uint64_t of_cache_source_fingerprint(const OFCache *cache);
+int of_cache_matches_face(const OFCache *cache, const OFFace *face);
+
+/* Returns a malloc-owned A8 bitmap compatible with of_bitmap_release().
+ * glyph_id may be NULL. */
+int of_cache_get_a8(OFCache *cache, uint16_t pixel_size, uint32_t codepoint,
+                    uint32_t *glyph_id, OFBitmap *out);
 
 const char *of_error_string(int code);
 
