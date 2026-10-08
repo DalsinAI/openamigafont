@@ -18,6 +18,9 @@ target_link_libraries(openfontcompile PRIVATE openfont)
 add_executable(test_openfont tests/test_openfont.c)
 target_link_libraries(test_openfont PRIVATE openfont)
 
+add_executable(test_cache tests/test_cache.c)
+target_link_libraries(test_cache PRIVATE openfont)
+
 enable_testing()
 find_file(OPENFONT_TEST_FONT
     NAMES DejaVuSans.ttf LiberationSans-Regular.ttf
@@ -29,4 +32,7 @@ if(OPENFONT_TEST_FONT)
     add_test(NAME openfont_compile
              COMMAND openfontcompile ${OPENFONT_TEST_FONT}
                      ${CMAKE_CURRENT_BINARY_DIR}/test.ofc 9 12 16 24)
+    add_test(NAME openfont_cache_roundtrip
+             COMMAND test_cache ${OPENFONT_TEST_FONT}
+                     ${CMAKE_CURRENT_BINARY_DIR}/roundtrip.ofc)
 endif()
