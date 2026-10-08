@@ -389,10 +389,16 @@ static int cache_validate(OFCache *cache)
         if (count > cache->last_codepoint - cache->first_codepoint + 1u)
             return 0;
         for (i = 0; i < count; ++i) {
-            uint32_t bitmap_bytes;
+            uint32_t width, height, bitmap_bytes;
             if ((size_t)(end - p) < 32)
                 return 0;
+            width = get32(p + 20);
+            height = get32(p + 24);
             bitmap_bytes = get32(p + 28);
+            if (width && height > UINT32_MAX / width)
+                return 0;
+            if (bitmap_bytes != width * height)
+                return 0;
             p += 32;
             if ((size_t)(end - p) < bitmap_bytes)
                 return 0;
