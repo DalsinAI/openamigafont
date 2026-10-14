@@ -8,7 +8,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
 
-add_library(openfont STATIC src/openfont.c)
+add_library(openfont STATIC src/openfont.c src/openfont_cache.c)
 target_include_directories(openfont PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(openfont PRIVATE PkgConfig::FREETYPE PkgConfig::HARFBUZZ)
 
@@ -20,6 +20,10 @@ target_link_libraries(test_openfont PRIVATE openfont)
 
 add_executable(test_cache tests/test_cache.c)
 target_link_libraries(test_cache PRIVATE openfont)
+
+add_executable(test_range tests/test_range.c)
+target_include_directories(test_range PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_range PRIVATE openfont)
 
 enable_testing()
 find_file(OPENFONT_TEST_FONT
@@ -36,3 +40,4 @@ if(OPENFONT_TEST_FONT)
              COMMAND test_cache ${OPENFONT_TEST_FONT}
                      ${CMAKE_CURRENT_BINARY_DIR}/roundtrip.ofc)
 endif()
+add_test(NAME openfont_range COMMAND test_range)
