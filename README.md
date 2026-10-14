@@ -99,9 +99,17 @@ OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
 `-m68020` and `-m68040`, `-O2 -Wall -Wextra -Werror`. The 68000 program is the
 fallback. The other two are the same worker.
 
-`src/openfont_omc.c` is not in that build. It needs the AmigaOS 3.2 NDK and
-`openmulticore.library`'s headers, which the stove has and the release tarball
-does not.
+`src/openfont_omc.c` is not in that build unless `OMC_INC` points at a
+directory that contains the NDK and `libraries/openmulticore.h`. The stove has
+those. The compiler release tarball does not, so the script does not invent
+them. With `OMC_INC` set it also builds `openfontomc-68000`, which opens
+`openmulticore.library`, checks the fallbacks, and runs the same eight glyphs
+through `OMC_RunRange`.
+
+On lab `openfont` (14 Oct 2026), that 68000 program built with OpenAmigaGCC
+16.2.0-open2 printed `OPENFONT_OMC PASS ver=0 rev=4 where=2`. Library 0.4,
+worker on the cores board (`OMCW_BOARD`). A NULL base, a revision-2 library
+and a count below the break-even still match the CPU loop.
 
 ## Amiga target
 
