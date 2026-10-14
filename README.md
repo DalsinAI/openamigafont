@@ -8,9 +8,11 @@ removes direct application dependencies on FreeType, HarfBuzz and fontconfig:
 those projects are reference/implementation technology behind OpenFont while
 applications call OpenFont.
 
-Current phase: **bootstrap core**. The host build deliberately uses upstream
-FreeType and HarfBuzz internally so the public OpenFont API and cache format can
-be tested before the Amiga resident library and AC090 leaves are wired in.
+Current phase: **bootstrap core, with a fast cache**. The x86/ARM64 build still
+uses FreeType and HarfBuzz inside OpenFont so the public API and the cache can
+be tested. Glyph lookup no longer walks the file, and a range of glyphs can run
+on extra cores or, with no cores board, as a plain loop on this CPU. The
+resident `openfont.library` is still to come.
 
 ## Architecture
 
@@ -44,7 +46,7 @@ The cache writer is intentionally useful before the full resident library:
 common font sizes can be compiled once so the 68k does no font parsing or
 rasterisation on a cache hit.
 
-## Build on the host
+## Build on the x86 or ARM64 cores
 
 Requirements: CMake, pkg-config, FreeType and HarfBuzz development packages.
 
@@ -60,8 +62,54 @@ Compile common sizes:
 ./build/openfontcompile /path/to/font.ttf font.ofc 9 10 11 12 14 16 18 24 32
 ```
 
-The file format is big-endian and fixed-width so the same cache is consumable
-by a 68k Amiga and by the host-side test/reference tools.
+The file format is big-endian. Version 3 (what `openfontcompile` writes now)
+carries a size directory, so a glyph is a couple of loads. Version 1 and 2
+caches still open.
+
+## Fast path: 68k fallback and OpenMulticore
+
+`of_cache_fill_range` fills one `OFRangeSlot` per codepoint. The slot is a
+multiple of 16 bytes, so it is a legal OpenMulticore slice: index `i` writes
+only `slots[i]`. The worker does not call the OS and does not allocate.
+
+- No `OFExec`, or fewer glyphs than the break-even (8): the worker runs in a
+  loop on this CPU. That is the 68k fallback, and it is the reference.
+- An `OFExec` runs the same worker. On Amiga, [src/openfont_omc.c](src/openfont_omc.c)
+  passes it to `OMC_RunRange` (`openmulticore.library` 0.3 or later). A cores
+  board spreads the indices. No board, an older library, or a refused job falls
+  back to the loop. The call does not set `OMCF_BOARD`, so a plain A1200 still
+  gets the glyphs.
+
+A cache hit does no rasterisation on either path. A glyph bigger than
+`OF_RANGE_PIXELS` (4096 bytes) stays a per-slot `OF_ERR_BUFFER`;
+`of_cache_get_a8` on this CPU still returns it. Shaping of one run stays on
+this CPU. Independent ranges are what the extra cores are for.
+
+The cache bytes and its index are one Fast RAM block (`of_cache_memory` in
+the internal header). Grant that block read-only and the slots write. Leave
+the job permissive.
+
+## 68k build
+
+[amiga/build.sh](amiga/build.sh) builds the range test with OpenAmigaGCC
+**16.2.0-open2**, the compiler in the `os32-gcc16` stove. Nothing in the
+OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
+`~/AmigaChrome/stoves/os32-gcc16`, then `/opt/openamigagcc-16.2.0-open2-x86_64-linux`.
+`CC` overrides that. It compiles the same sources three times: `-m68000`,
+`-m68020` and `-m68040`, `-O2 -Wall -Wextra -Werror`. The 68000 program is the
+fallback. The other two are the same worker.
+
+`src/openfont_omc.c` is not in that build unless `OMC_INC` points at a
+directory that contains the NDK and `libraries/openmulticore.h`. The stove has
+those. The compiler release tarball does not, so the script does not invent
+them. With `OMC_INC` set it also builds `openfontomc-68000`, which opens
+`openmulticore.library`, checks the fallbacks, and runs the same eight glyphs
+through `OMC_RunRange`.
+
+On lab `openfont` (14 Oct 2026), that 68000 program built with OpenAmigaGCC
+16.2.0-open2 printed `OPENFONT_OMC PASS ver=0 rev=4 where=2`. Library 0.4,
+worker on the cores board (`OMCW_BOARD`). A NULL base, a revision-2 library
+and a count below the break-even still match the CPU loop.
 
 ## Amiga target
 

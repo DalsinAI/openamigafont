@@ -9,8 +9,13 @@ extern "C" {
 #endif
 
 #define OF_VERSION_MAJOR 0
-#define OF_VERSION_MINOR 2
+#define OF_VERSION_MINOR 3
 #define OF_VERSION_PATCH 0
+
+/* Glyphs in one of_cache_fill_range call before the OpenMulticore path is worth it.
+ * Below this, the same worker runs in a loop on this CPU. */
+#define OF_RANGE_BREAK_EVEN 8
+#define OF_RANGE_PIXELS 4096
 
 typedef struct OFContext OFContext;
 typedef struct OFFace OFFace;
@@ -35,6 +40,31 @@ typedef struct OFBitmap {
     uint8_t *pixels;
 } OFBitmap;
 
+/* One codepoint of a range. sizeof is a multiple of 16 so it can be an
+ * OpenMulticore slice: index i writes only slots[i]. */
+typedef struct OFRangeSlot {
+    int32_t status;
+    uint32_t glyph_id;
+    int32_t left;
+    int32_t top;
+    int32_t advance_x_26_6;
+    uint32_t width;
+    uint32_t height;
+    uint32_t npixels;
+    uint8_t pixels[OF_RANGE_PIXELS];
+} OFRangeSlot;
+
+typedef int (*OFIndexFn)(uint32_t index, void *arg);
+
+/* run_range may call fn for distinct indices at the same time. fn writes
+ * only its own index. NULL run_range, or a count below break_even, stays
+ * on this CPU. break_even 0 means OF_RANGE_BREAK_EVEN. */
+typedef struct OFExec {
+    int (*run_range)(OFIndexFn fn, uint32_t count, void *arg, void *user);
+    void *user;
+    uint32_t break_even;
+} OFExec;
+
 enum {
     OF_OK = 0,
     OF_ERR_ARGUMENT = -1,
@@ -43,7 +73,8 @@ enum {
     OF_ERR_FONT = -4,
     OF_ERR_RANGE = -5,
     OF_ERR_BUFFER = -6,
-    OF_ERR_CACHE = -7
+    OF_ERR_CACHE = -7,
+    OF_ERR_EXEC = -8
 };
 
 OFContext *of_context_create(void);
@@ -75,6 +106,17 @@ int of_cache_matches_face(const OFCache *cache, const OFFace *face);
  * glyph_id may be NULL. */
 int of_cache_get_a8(OFCache *cache, uint16_t pixel_size, uint32_t codepoint,
                     uint32_t *glyph_id, OFBitmap *out);
+
+/* Copy one cached glyph into slot. No allocation. A bitmap larger than
+ * OF_RANGE_PIXELS sets OF_ERR_BUFFER and npixels to the size needed. */
+int of_cache_fill_slot(const OFCache *cache, uint16_t pixel_size,
+                       uint32_t codepoint, OFRangeSlot *slot);
+
+/* Fill slots[0 .. count) for codepoints first .. first+count-1.
+ * exec NULL is the 68k fallback. The same worker runs either way. */
+int of_cache_fill_range(const OFCache *cache, uint16_t pixel_size,
+                        uint32_t first_codepoint, uint32_t count,
+                        OFRangeSlot *slots, const OFExec *exec);
 
 const char *of_error_string(int code);
 
