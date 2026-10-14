@@ -32,3 +32,13 @@ for cpu in 68000 68020 68040; do
         "$ROOT/tests/test_range.c" "$ROOT/src/openfont_cache.c"
     echo "$OUT/openfontrange-$cpu ($(wc -c < "$OUT/openfontrange-$cpu") bytes)"
 done
+
+# The OpenMulticore path needs the NDK and openamigamulticore/include.
+# OMC_INC is that include directory. Without it, only the range test is built.
+if [ -n "${OMC_INC:-}" ]; then
+    "$CC" -m68000 -O2 -Wall -Wextra -Werror \
+        -I "$ROOT/include" -I "$ROOT/src" -I "$OMC_INC" \
+        -o "$OUT/openfontomc-68000" \
+        "$ROOT/tests/test_omc.c" "$ROOT/src/openfont_omc.c" "$ROOT/src/openfont_cache.c"
+    echo "$OUT/openfontomc-68000 ($(wc -c < "$OUT/openfontomc-68000") bytes)"
+fi
