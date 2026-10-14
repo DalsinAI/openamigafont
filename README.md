@@ -89,6 +89,20 @@ The cache bytes and its index are one Fast RAM block (`of_cache_memory` in
 the internal header). Grant that block read-only and the slots write. Leave
 the job permissive.
 
+## 68k build
+
+[amiga/build.sh](amiga/build.sh) builds the range test with OpenAmigaGCC
+**16.2.0-open2**, the compiler in the `os32-gcc16` stove. Nothing in the
+OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
+`~/AmigaChrome/stoves/os32-gcc16`, then `/opt/openamigagcc-16.2.0-open2-x86_64-linux`.
+`CC` overrides that. It compiles the same sources three times: `-m68000`,
+`-m68020` and `-m68040`, `-O2 -Wall -Wextra -Werror`. The 68000 program is the
+fallback. The other two are the same worker.
+
+`src/openfont_omc.c` is not in that build. It needs the AmigaOS 3.2 NDK and
+`openmulticore.library`'s headers, which the stove has and the release tarball
+does not.
+
 ## Amiga target
 
 The resident `openfont.library` will be added after this bootstrap core is
