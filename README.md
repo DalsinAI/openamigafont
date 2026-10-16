@@ -125,5 +125,5 @@ FreeType/HarfBuzz compatibility headers will be provided for the subset needed
 by existing ports, but they are compatibility front ends. New Open software
 uses OpenFont directly.
 
-MIT licensed Dalsin code. FreeType and HarfBuzz retain their own upstream
+MIT licensed AmigaChrome Team code. FreeType and HarfBuzz retain their own upstream
 licences when used to build the bootstrap/reference implementation.
