@@ -114,19 +114,19 @@ the job permissive.
 **16.2.0-open2**, the compiler in the `os32-gcc16` stove. Nothing in the
 OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
 `~/AmigaChrome/stoves/os32-gcc16`, then `/opt/openamigagcc-16.2.0-open2-x86_64-linux`.
-`CC` overrides that. It compiles the same sources three times: `-m68000`,
-`-m68020` and `-m68040`, `-O2 -Wall -Wextra -Werror`. The 68000 program is the
-fallback. The other two are the same worker.
+`CC` overrides that. It compiles the sources for the 68040 only: `-m68040`,
+`-O2 -Wall -Wextra -Werror`, soft float through `toolchain/m68k-soft-m68040.specs`
+(libnix's soft maths, not libm881), so it also runs on an LC or EC040.
 
 `src/openfont_omc.c` is not in that build unless `OMC_INC` points at a
 directory that contains the NDK and `libraries/openmulticore.h`. The stove has
 those. The compiler release tarball does not, so the script does not invent
-them. With `OMC_INC` set it also builds `openfontomc-68000` and
-`openfontomc-68040`. Both open `openmulticore.library`, check the fallbacks,
-and run the same eight glyphs through `OMC_RunRange`. The 68040 binary is the
-target. The 68000 binary is the fallback.
+them. With `OMC_INC` set it also builds `openfontomc-68040`. It opens
+`openmulticore.library`, checks the fallbacks, and runs the same eight glyphs
+through `OMC_RunRange`.
 
-On lab `openfont` (14 Oct 2026), that 68000 program built with OpenAmigaGCC
+On lab `openfont` (14 Oct 2026), a 68000 build of that program (before builds
+became 68040 only, 17 Oct 2026), built with OpenAmigaGCC
 16.2.0-open2 printed `OPENFONT_OMC PASS ver=0 rev=4 where=2`. Library 0.4,
 worker on the cores board (`OMCW_BOARD`). A NULL base, a revision-2 library
 and a count below the break-even still match the CPU loop.

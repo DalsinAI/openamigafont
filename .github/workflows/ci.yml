@@ -33,5 +33,5 @@ jobs:
             --pattern 'SHA256SUMS'
           sha256sum -c --ignore-missing SHA256SUMS
           tar -xJf openamigagcc-16.2.0-open2-x86_64-linux.tar.xz
-      - name: 68000, 68020 and 68040
+      - name: 68040
         run: CC="$GITHUB_WORKSPACE/openamigagcc-16.2.0-open2-x86_64-linux/bin/m68k-amigaos-gcc" sh amiga/build.sh
