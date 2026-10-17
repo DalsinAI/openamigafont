@@ -225,4 +225,10 @@ by existing ports, but they are compatibility front ends. New Open software
 uses OpenFont directly.
 
 MIT licensed AmigaChrome Team code. FreeType and HarfBuzz retain their own upstream
-licences when used to build the bootstrap/reference implementation.
+licences when used to build the bootstrap/reference implementation, and in
+`openfont.library`, which carries FreeType under the FreeType License (FTL)
+and HarfBuzz under its MIT licence. The build copies those licences to
+`build/amiga/licences`; they go wherever the library is copied.
+
+Portions of openfont.library are copyright © 2026 The FreeType Project
+(https://freetype.org). All rights reserved.

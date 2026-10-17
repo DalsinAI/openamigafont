@@ -160,6 +160,12 @@ if [ -s "$OUT/undefined.txt" ]; then
 fi
 echo "$OUT/openfont.library ($(wc -c < "$OUT/openfont.library") bytes)"
 sha256sum "$OUT/openfont.library"
+# the licences that go with the library wherever it is copied
+mkdir -p "$OUT/licences"
+cp "$ROOT/LICENSE" "$OUT/licences/OpenFont.txt"
+cp "$FT/LICENSE.TXT" "$OUT/licences/FreeType-LICENSE.txt"
+cp "$FT/docs/FTL.TXT" "$OUT/licences/FreeType-FTL.txt"
+cp "$HB/COPYING" "$OUT/licences/HarfBuzz.txt"
 
 # ---- the SDK's link library (the varargs calls), and the lab test ----
 SDKFLAGS="$CPU -O2 -Wall -Wextra -Werror -fno-delete-null-pointer-checks $NDKFLAGS -I$ROOT/sdk/Include_H -D_TIMEVAL_DEFINED"
