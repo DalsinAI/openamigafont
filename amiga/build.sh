@@ -25,7 +25,7 @@ fi
 OUT=${1:-$ROOT/build}
 mkdir -p "$OUT"
 "$CC" --version | head -1
-for cpu in 68000 68020 68040; do
+for cpu in 68040; do
     "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
         -I "$ROOT/include" -I "$ROOT/src" \
         -o "$OUT/openfontrange-$cpu" \
@@ -35,9 +35,9 @@ done
 
 # The OpenMulticore path needs the NDK and openamigamulticore/include.
 # OMC_INC is that include directory. Without it, only the range test is built.
-# 68000 is the fallback. 68040 is the target (68040 + FPU). Same sources.
+# Builds are for the 68040 only (the target, 68040 + FPU).
 if [ -n "${OMC_INC:-}" ]; then
-    for cpu in 68000 68040; do
+    for cpu in 68040; do
         "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
             -I "$ROOT/include" -I "$ROOT/src" -I "$OMC_INC" \
             -o "$OUT/openfontomc-$cpu" \
