@@ -10,6 +10,9 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
+# Soft float: the specs file links libnix's soft libm020 (maths through the
+# mathieee libraries), not libm881, so one build runs on every 68040.
+SPECS="-specs=$ROOT/toolchain/m68k-soft-m68040.specs"
 if [ -z "${CC:-}" ]; then
     if [ -x "$HOME/AmigaChrome/stoves/os32-gcc16/bin/m68k-amigaos-gcc" ]; then
         CC=$HOME/AmigaChrome/stoves/os32-gcc16/bin/m68k-amigaos-gcc
@@ -26,7 +29,7 @@ OUT=${1:-$ROOT/build}
 mkdir -p "$OUT"
 "$CC" --version | head -1
 for cpu in 68040; do
-    "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
+    "$CC" -m"$cpu" $SPECS -O2 -Wall -Wextra -Werror \
         -I "$ROOT/include" -I "$ROOT/src" \
         -o "$OUT/openfontrange-$cpu" \
         "$ROOT/tests/test_range.c" "$ROOT/src/openfont_cache.c"
@@ -38,7 +41,7 @@ done
 # Builds are for the 68040 only (the target, 68040 + FPU).
 if [ -n "${OMC_INC:-}" ]; then
     for cpu in 68040; do
-        "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
+        "$CC" -m"$cpu" $SPECS -O2 -Wall -Wextra -Werror \
             -I "$ROOT/include" -I "$ROOT/src" -I "$OMC_INC" \
             -o "$OUT/openfontomc-$cpu" \
             "$ROOT/tests/test_omc.c" "$ROOT/src/openfont_omc.c" "$ROOT/src/openfont_cache.c"

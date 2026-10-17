@@ -96,7 +96,8 @@ the job permissive.
 OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
 `~/AmigaChrome/stoves/os32-gcc16`, then `/opt/openamigagcc-16.2.0-open2-x86_64-linux`.
 `CC` overrides that. It compiles the sources for the 68040 only: `-m68040`,
-`-O2 -Wall -Wextra -Werror`.
+`-O2 -Wall -Wextra -Werror`, soft float through `toolchain/m68k-soft-m68040.specs`
+(libnix's soft maths, not libm881), so it also runs on an LC or EC040.
 
 `src/openfont_omc.c` is not in that build unless `OMC_INC` points at a
 directory that contains the NDK and `libraries/openmulticore.h`. The stove has
