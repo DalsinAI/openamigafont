@@ -1,4 +1,4 @@
-/* The C library pieces that FreeType, HarfBuzz and OpenFont's core use
+/* The C library pieces that HarfBuzz and OpenFont's core use
  * inside openfont.library: memory from one Exec pool. Every call into the
  * core holds the library's lock, so the pool needs no lock of its own.
  * The library runs no C startup and keeps no stdio: the rest of what the

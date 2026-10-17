@@ -5,19 +5,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_TRUETYPE_TABLES_H
+#include "of_font.h"
+
 #include <hb.h>
-#include <hb-ft.h>
+#include <hb-ot.h>
+
+/* The fonts are read and drawn by OpenFont's own reader and rasteriser
+ * (of_font.c, of_cff.c, of_raster.c). HarfBuzz still shapes, over the same
+ * font data, with its glyphs' advances taken from OpenFont so the shaping
+ * and the bitmaps agree. */
 
 struct OFContext {
-    FT_Library ft;
+    hb_font_funcs_t *advances;      /* HarfBuzz's way to OpenFont's advances */
 };
 
 struct OFFace {
     OFContext *ctx;
-    FT_Face ft_face;
+    OFFont font;
+    OFPath path;                    /* reused by every raster of this face */
     hb_font_t *hb_font;
     uint32_t pixel_size;
     uint32_t refs;
@@ -44,15 +49,30 @@ static uint64_t fingerprint_bytes(const uint8_t *p, size_t n)
     return h;
 }
 
+/* HarfBuzz asks OpenFont for advances: the same, to the 64th of a pixel,
+ * as the bitmaps', at the face's size */
+static hb_position_t hb_advance(hb_font_t *font, void *font_data, hb_codepoint_t glyph, void *user)
+{
+    OFFace *face = (OFFace *)font_data;
+    (void)font;
+    (void)user;
+    if (glyph >= face->font.num_glyphs)
+        return 0;
+    return of_font_advance_px(&face->font, glyph, face->pixel_size);
+}
+
 OFContext *of_context_create(void)
 {
     OFContext *ctx = (OFContext *)calloc(1, sizeof(*ctx));
     if (!ctx)
         return NULL;
-    if (FT_Init_FreeType(&ctx->ft)) {
+    ctx->advances = hb_font_funcs_create();
+    if (ctx->advances == hb_font_funcs_get_empty()) {
         free(ctx);
         return NULL;
     }
+    hb_font_funcs_set_glyph_h_advance_func(ctx->advances, hb_advance, NULL, NULL);
+    hb_font_funcs_make_immutable(ctx->advances);
     return ctx;
 }
 
@@ -60,7 +80,7 @@ void of_context_destroy(OFContext *ctx)
 {
     if (!ctx)
         return;
-    FT_Done_FreeType(ctx->ft);
+    hb_font_funcs_destroy(ctx->advances);   /* faces still open hold their own */
     free(ctx);
 }
 
@@ -68,7 +88,10 @@ static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
                            uint32_t face_index, int take, int *error)
 {
     OFFace *face;
-    FT_Error fe;
+    hb_blob_t *blob;
+    hb_face_t *hb_face;
+    hb_font_t *parent;
+    int rc;
     if (!ctx || !data || !size) {
         if (take)
             free(data);
@@ -88,23 +111,32 @@ static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
     face->data_size = size;
     face->face_index = face_index;
     face->owns_data = take;
-    fe = FT_New_Memory_Face(ctx->ft, data, (FT_Long)size, (FT_Long)face_index, &face->ft_face);
-    if (fe) {
+    of_path_init(&face->path);
+    rc = size > 0xFFFFFFFFu ? OF_ERR_FONT : of_font_open(&face->font, data, size, face_index);
+    if (rc != OF_OK) {
+        of_font_close(&face->font);
         if (take)
             free(data);
         free(face);
-        *error = fe == FT_Err_Out_Of_Memory ? OF_ERR_MEMORY : OF_ERR_FONT;
+        *error = rc;
         return NULL;
     }
-    face->hb_font = hb_ft_font_create_referenced(face->ft_face);
-    if (!face->hb_font) {
-        FT_Done_Face(face->ft_face);
+    blob = hb_blob_create((const char *)data, (unsigned)size, HB_MEMORY_MODE_READONLY, NULL, NULL);
+    hb_face = hb_face_create(blob, face_index);
+    hb_blob_destroy(blob);
+    parent = hb_font_create(hb_face);
+    hb_face_destroy(hb_face);
+    face->hb_font = hb_font_create_sub_font(parent);
+    hb_font_destroy(parent);
+    if (face->hb_font == hb_font_get_empty()) {
+        of_font_close(&face->font);
         if (take)
             free(data);
         free(face);
         *error = OF_ERR_MEMORY;
         return NULL;
     }
+    hb_font_set_funcs(face->hb_font, ctx->advances, face, NULL);
     if ((*error = of_face_set_pixel_size(face, 16)) != OF_OK) {
         of_face_close(face);
         return NULL;
@@ -154,7 +186,8 @@ void of_face_close(OFFace *face)
     for (i = 0; i < face->nfallbacks; ++i)
         of_face_close(face->fallbacks[i]);
     hb_font_destroy(face->hb_font);
-    FT_Done_Face(face->ft_face);
+    of_font_close(&face->font);
+    of_path_free(&face->path);
     if (face->owns_data)
         free(face->data);
     free(face);
@@ -166,69 +199,63 @@ int of_face_set_pixel_size(OFFace *face, uint32_t pixels)
         return OF_ERR_ARGUMENT;
     if (face->pixel_size == pixels)
         return OF_OK;
-    if (FT_Set_Pixel_Sizes(face->ft_face, 0, pixels))
+    if (pixels > 16384)
         return OF_ERR_FONT;
-    hb_ft_font_changed(face->hb_font);
+    /* positions in 26.6, unhinted, as the bitmaps */
+    hb_font_set_scale(face->hb_font, (int)pixels * 64, (int)pixels * 64);
+    hb_font_set_ppem(face->hb_font, pixels, pixels);
     face->pixel_size = pixels;
     return OF_OK;
 }
 
-static void copy_name(char *out, size_t size, const char *in)
+/* the face as OFFaceInfo tells it, from a font opened in full or for its
+ * description only; pixel_size 0 leaves the line metrics 0 */
+static void font_info(const OFFont *f, uint32_t pixel_size, OFFaceInfo *info)
 {
-    size_t n = in ? strlen(in) : 0;
-    if (n >= size)
-        n = size - 1;
-    if (n)
-        memcpy(out, in, n);
-    out[n] = 0;
+    unsigned style = of_font_style(f);
+    memset(info, 0, sizeof(*info));
+    /* the family and style a program shows: the font's own (name IDs 1 and
+     * 2), or its typographic ones when it has only those */
+    if (!of_font_name(f, 1, info->family, sizeof info->family))
+        of_font_name(f, 16, info->family, sizeof info->family);
+    if (!of_font_name(f, 2, info->style, sizeof info->style))
+        of_font_name(f, 17, info->style, sizeof info->style);
+    if (f->os2_version != 0xFFFF) {
+        info->weight = f->weight;
+        info->width = f->width;
+        memcpy(info->unicode_ranges, f->unicode_ranges, sizeof info->unicode_ranges);
+    }
+    if (!info->weight)
+        info->weight = (style & OF_STYLE_BOLD) ? 700 : 400;
+    if (!info->width)
+        info->width = 5;
+    if (style & OF_STYLE_ITALIC)
+        info->flags |= OF_FACE_ITALIC;
+    if (f->is_fixed_pitch)
+        info->flags |= OF_FACE_FIXED;
+    if (f->scalable)
+        info->flags |= OF_FACE_SCALABLE;
+    if (of_font_has_color(f))
+        info->flags |= OF_FACE_COLOR;
+    info->units_per_em = f->units_per_em;
+    info->pixel_size = pixel_size;
+    info->num_glyphs = f->num_glyphs;
+    info->num_faces = f->num_faces;
+    if (pixel_size)
+        of_font_line_px(f, pixel_size, &info->ascender_26_6, &info->descender_26_6, &info->height_26_6);
 }
 
 int of_face_info(OFFace *face, OFFaceInfo *info)
 {
-    FT_Face f;
-    TT_OS2 *os2;
     if (!face || !info)
         return OF_ERR_ARGUMENT;
-    f = face->ft_face;
-    memset(info, 0, sizeof(*info));
-    copy_name(info->family, sizeof info->family, f->family_name);
-    copy_name(info->style, sizeof info->style, f->style_name);
-    os2 = (TT_OS2 *)FT_Get_Sfnt_Table(f, FT_SFNT_OS2);
-    if (os2 && os2->version != 0xFFFFu) {
-        info->weight = os2->usWeightClass;
-        info->width = os2->usWidthClass;
-        info->unicode_ranges[0] = (uint32_t)os2->ulUnicodeRange1;
-        info->unicode_ranges[1] = (uint32_t)os2->ulUnicodeRange2;
-        info->unicode_ranges[2] = (uint32_t)os2->ulUnicodeRange3;
-        info->unicode_ranges[3] = (uint32_t)os2->ulUnicodeRange4;
-    }
-    if (!info->weight)
-        info->weight = (f->style_flags & FT_STYLE_FLAG_BOLD) ? 700 : 400;
-    if (!info->width)
-        info->width = 5;
-    if (f->style_flags & FT_STYLE_FLAG_ITALIC)
-        info->flags |= OF_FACE_ITALIC;
-    if (FT_IS_FIXED_WIDTH(f))
-        info->flags |= OF_FACE_FIXED;
-    if (FT_IS_SCALABLE(f))
-        info->flags |= OF_FACE_SCALABLE;
-    if (FT_HAS_COLOR(f))
-        info->flags |= OF_FACE_COLOR;
-    info->units_per_em = f->units_per_EM;
-    info->pixel_size = face->pixel_size;
-    info->num_glyphs = (uint32_t)f->num_glyphs;
-    info->num_faces = (uint32_t)f->num_faces;
-    if (f->size) {
-        info->ascender_26_6 = (int32_t)f->size->metrics.ascender;
-        info->descender_26_6 = (int32_t)f->size->metrics.descender;
-        info->height_26_6 = (int32_t)f->size->metrics.height;
-    }
+    font_info(&face->font, face->pixel_size, info);
     return OF_OK;
 }
 
 uint32_t of_face_char_index(OFFace *face, uint32_t codepoint)
 {
-    return face ? (uint32_t)FT_Get_Char_Index(face->ft_face, codepoint) : 0;
+    return face ? of_font_glyph(&face->font, codepoint) : 0;
 }
 
 /* One walk at a time: the faces are not shared between threads (the
@@ -287,76 +314,167 @@ OFFace *of_face_fallback(OFFace *face, uint32_t n)
     return face->fallbacks[n - 1];
 }
 
-/* ---- reading a face's tables through a stream (the index) ---- */
+/* ---- probing a face for the index: only the tables that describe it ---- */
 
-typedef struct Probe {
-    OFFile *file;
-    int io_error;               /* a read inside the file came back short */
-} Probe;
+#define PROBE_TAG(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
 
-static unsigned long stream_read(FT_Stream stream, unsigned long offset,
-                                 unsigned char *buffer, unsigned long count)
+static uint32_t be32(const uint8_t *p)
 {
-    Probe *p = (Probe *)stream->descriptor.pointer;
-    uint32_t got;
-    if (!count)
-        return offset <= stream->size ? 0 : 1;  /* a seek: 0 is success */
-    got = of_io_read_at(p->file, (uint32_t)offset, buffer, (uint32_t)count);
-    /* FreeType asks only within the size it was given, so short here is
-     * the disk (or the file cut while we read), not the font */
-    if (got < count && offset < stream->size && count <= stream->size - offset)
-        p->io_error = 1;
-    return got;
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
-static void stream_close(FT_Stream stream)
+static void put32(uint8_t *p, uint32_t v)
 {
-    Probe *p = (Probe *)stream->descriptor.pointer;
-    of_io_close(p->file);
-    p->file = NULL;
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+/* reads count bytes at offset; OF_ERR_FONT when they are past the file's
+ * end (the font says so), OF_ERR_IO when the disk gives fewer */
+static int read_exact(OFFile *file, uint32_t file_size, uint32_t offset, void *buf, uint32_t count)
+{
+    if (offset > file_size || count > file_size - offset)
+        return OF_ERR_FONT;
+    return of_io_read_at(file, offset, buf, count) == count ? OF_OK : OF_ERR_IO;
+}
+
+/* The face_index-th face's describing tables read into a small font of its
+ * own (a header, a directory, the tables), so a large font (a CJK
+ * collection) is never read whole. *faces: how many the file holds. */
+static int read_describing_tables(OFFile *file, uint32_t file_size, uint32_t face_index,
+                                  uint8_t **out, size_t *out_size, uint32_t *faces)
+{
+    static const uint32_t wanted[] = {
+        PROBE_TAG('h', 'e', 'a', 'd'), PROBE_TAG('h', 'h', 'e', 'a'), PROBE_TAG('m', 'a', 'x', 'p'),
+        PROBE_TAG('n', 'a', 'm', 'e'), PROBE_TAG('O', 'S', '/', '2'), PROBE_TAG('p', 'o', 's', 't')
+    };
+    /* tables whose presence alone says something (outlines, colour): kept
+     * in the directory with 4 bytes each */
+    static const uint32_t marks[] = {
+        PROBE_TAG('g', 'l', 'y', 'f'), PROBE_TAG('C', 'F', 'F', ' '), PROBE_TAG('C', 'F', 'F', '2'),
+        PROBE_TAG('C', 'O', 'L', 'R'), PROBE_TAG('C', 'B', 'D', 'T'), PROBE_TAG('s', 'b', 'i', 'x'),
+        PROBE_TAG('S', 'V', 'G', ' ')
+    };
+    uint8_t head[12], *dir = NULL, *font = NULL;
+    uint32_t dir_off = 0, n, i, k, keep = 0, at;
+    size_t total;
+    int rc;
+
+    *out = NULL;
+    *faces = 1;
+    if ((rc = read_exact(file, file_size, 0, head, 12)) != OF_OK)
+        return rc;
+    if (be32(head) == PROBE_TAG('t', 't', 'c', 'f')) {
+        uint8_t off[4];
+        *faces = be32(head + 8);
+        if (!*faces || face_index >= *faces)
+            return OF_ERR_FONT;
+        if ((rc = read_exact(file, file_size, 12 + 4 * face_index, off, 4)) != OF_OK)
+            return rc;
+        dir_off = be32(off);
+        if ((rc = read_exact(file, file_size, dir_off, head, 12)) != OF_OK)
+            return rc;
+    } else if (face_index) {
+        return OF_ERR_FONT;
+    }
+    n = ((uint32_t)head[4] << 8) | head[5];
+    if (!n)
+        return OF_ERR_FONT;
+    dir = (uint8_t *)malloc(16 * n);
+    if (!dir)
+        return OF_ERR_MEMORY;
+    if ((rc = read_exact(file, file_size, dir_off + 12, dir, 16 * n)) != OF_OK)
+        goto done;
+    /* what to keep, and how much room */
+    total = 12;
+    for (i = 0; i < n; ++i) {
+        uint32_t tag = be32(dir + 16 * i), len = be32(dir + 16 * i + 12);
+        for (k = 0; k < sizeof wanted / sizeof wanted[0]; ++k)
+            if (tag == wanted[k]) {
+                if (len > file_size) {
+                    rc = OF_ERR_FONT;
+                    goto done;
+                }
+                keep++;
+                total += 16 + ((len + 3) & ~3u);
+            }
+        for (k = 0; k < sizeof marks / sizeof marks[0]; ++k)
+            if (tag == marks[k] && len) {
+                keep++;
+                total += 16 + 4;
+            }
+    }
+    font = (uint8_t *)calloc(1, total);
+    if (!font) {
+        rc = OF_ERR_MEMORY;
+        goto done;
+    }
+    memcpy(font, head, 12);
+    font[4] = (uint8_t)(keep >> 8);
+    font[5] = (uint8_t)keep;
+    at = 12 + 16 * keep;
+    k = 0;
+    for (i = 0; i < n; ++i) {
+        const uint8_t *r = dir + 16 * i;
+        uint32_t tag = be32(r), len = be32(r + 12), w, mark = 0, want = 0;
+        for (w = 0; w < sizeof wanted / sizeof wanted[0]; ++w)
+            if (tag == wanted[w])
+                want = 1;
+        for (w = 0; w < sizeof marks / sizeof marks[0]; ++w)
+            if (tag == marks[w] && len)
+                mark = 1;
+        if (!want && !mark)
+            continue;
+        memcpy(font + 12 + 16 * k, r, 8);   /* tag, checksum */
+        put32(font + 12 + 16 * k + 8, at);
+        if (want) {
+            put32(font + 12 + 16 * k + 12, len);
+            if (len && (rc = read_exact(file, file_size, be32(r + 8), font + at, len)) != OF_OK)
+                goto done;
+            at += (len + 3) & ~3u;
+        } else {
+            put32(font + 12 + 16 * k + 12, 4);
+            at += 4;
+        }
+        k++;
+    }
+    *out = font;
+    *out_size = total;
+    font = NULL;
+    rc = OF_OK;
+done:
+    free(dir);
+    free(font);
+    return rc;
 }
 
 int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceInfo *info)
 {
-    FT_StreamRec *stream;
-    FT_Open_Args args;
-    OFFace face;
-    Probe probe;
-    uint32_t size = 0;
+    OFFile *file;
+    OFFont font;
+    uint8_t *data;
+    size_t size;
+    uint32_t file_size = 0, faces;
     int rc;
 
     if (!ctx || !path || !info)
         return OF_ERR_ARGUMENT;
-    probe.io_error = 0;
-    probe.file = of_io_open(path, &size);
-    if (!probe.file)
+    file = of_io_open(path, &file_size);
+    if (!file)
         return OF_ERR_IO;
-    /* FreeType keeps the stream until the face is done, and closes it */
-    stream = (FT_StreamRec *)calloc(1, sizeof(*stream));
-    if (!stream) {
-        of_io_close(probe.file);
-        return OF_ERR_MEMORY;
+    rc = read_describing_tables(file, file_size, face_index, &data, &size, &faces);
+    of_io_close(file);
+    if (rc != OF_OK)
+        return rc;
+    rc = of_font_open_info(&font, data, size, 0);
+    if (rc == OF_OK) {
+        font_info(&font, 0, info);   /* no size: line metrics 0, as before */
+        info->num_faces = faces;
     }
-    stream->size = size;
-    stream->descriptor.pointer = &probe;
-    stream->read = stream_read;
-    stream->close = stream_close;
-    memset(&args, 0, sizeof args);
-    args.flags = FT_OPEN_STREAM;
-    args.stream = stream;
-    memset(&face, 0, sizeof face);
-    if ((rc = FT_Open_Face(ctx->ft, &args, (FT_Long)face_index, &face.ft_face)) != 0) {
-        /* FT_Open_Face closes a stream it was given, even on failure */
-        free(stream);
-        if (rc == FT_Err_Out_Of_Memory)
-            return OF_ERR_MEMORY;
-        return probe.io_error ? OF_ERR_IO : OF_ERR_FONT;
-    }
-    rc = of_face_info(&face, info);
-    FT_Done_Face(face.ft_face);
-    free(stream);
-    if (rc == OF_OK && probe.io_error)
-        rc = OF_ERR_IO;         /* its tables read short: don't trust them */
+    of_font_close(&font);
+    free(data);
     return rc;
 }
 
@@ -577,38 +695,25 @@ int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes)
 
 int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out)
 {
-    FT_GlyphSlot g;
-    size_t bytes, y;
-    uint8_t *pixels;
+    int rc;
+    int32_t left, top;
     if (!face || !out)
         return OF_ERR_ARGUMENT;
     memset(out, 0, sizeof(*out));
-    if (FT_Load_Glyph(face->ft_face, glyph_id, FT_LOAD_DEFAULT))
+    if (glyph_id >= face->font.num_glyphs)
         return OF_ERR_FONT;
-    if (FT_Render_Glyph(face->ft_face->glyph, FT_RENDER_MODE_NORMAL))
-        return OF_ERR_FONT;
-    g = face->ft_face->glyph;
-    out->width = g->bitmap.width;
-    out->height = g->bitmap.rows;
-    out->left = g->bitmap_left;
-    out->top = g->bitmap_top;
-    out->advance_x_26_6 = (int32_t)g->advance.x;
+    of_path_reset(&face->path);
+    rc = of_font_outline_px(&face->font, glyph_id, face->pixel_size, &face->path);
+    if (rc != OF_OK)
+        return rc;
+    rc = of_raster_a8(&face->path, &out->width, &out->height, &left, &top, &out->pixels);
+    if (rc != OF_OK)
+        return rc;
+    out->left = left;
+    out->top = top;
     out->stride = out->width;
-    if (!out->width || !out->height)
-        return OF_OK;
-    bytes = (size_t)out->width * out->height;
-    pixels = (uint8_t *)malloc(bytes);
-    if (!pixels)
-        return OF_ERR_MEMORY;
-    for (y = 0; y < out->height; ++y) {
-        const uint8_t *src;
-        if (g->bitmap.pitch >= 0)
-            src = g->bitmap.buffer + y * (size_t)g->bitmap.pitch;
-        else
-            src = g->bitmap.buffer + (out->height - 1 - y) * (size_t)(-g->bitmap.pitch);
-        memcpy(pixels + y * out->width, src, out->width);
-    }
-    out->pixels = pixels;
+    /* the pen moves by the unrounded advance, as the shaping does */
+    out->advance_x_26_6 = of_font_advance_px(&face->font, glyph_id, face->pixel_size);
     return OF_OK;
 }
 
@@ -687,7 +792,7 @@ int of_compile_cache(OFFace *face, const char *path,
         }
         for (i = 0; i < span; ++i) {
             uint32_t cp = first_codepoint + (uint32_t)i;
-            uint32_t gid = FT_Get_Char_Index(face->ft_face, cp);
+            uint32_t gid = of_font_glyph(&face->font, cp);
             OFBitmap b;
             rc = of_raster_glyph_a8(face, gid, &b);
             if (rc != OF_OK) {

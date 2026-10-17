@@ -1,6 +1,6 @@
 /* of_call_on_stack: openfont.library does its work on a stack of its own.
- * Programs often call with 4 KB of stack, and FreeType's rasteriser and
- * HarfBuzz's shaper want more than that. Every call into the core holds
+ * Programs often call with 4 KB of stack, and HarfBuzz's shaper wants more
+ * than that. Every call into the core holds
  * the library's lock, so one stack serves them all.
  *
  * The stack the caller passes, as the routine reads it after saving six

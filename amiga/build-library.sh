@@ -1,8 +1,9 @@
 #!/bin/sh
 # Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
 # openfont.library for AmigaOS 3.2 on the 68040, built with OpenAmigaGCC
-# 16.2.0-open2 (the os32-gcc16 stove's compiler), with FreeType 2.14.3 and
-# HarfBuzz 14.5.1 inside it.
+# 16.2.0-open2 (the os32-gcc16 stove's compiler). The fonts are read and
+# drawn by OpenFont's own code; HarfBuzz 14.5.1 is inside it for shaping,
+# until OpenFont's own shaper replaces it.
 #
 #   amiga/build-library.sh [OUT_DIR]          (default build/amiga)
 #
@@ -13,8 +14,6 @@
 #   TARBALLS   where the upstream sources are kept (default amiga/tarballs);
 #              each is checked against amiga/SOURCES, and fetched when
 #              missing
-#   FREETYPE_GIT  a checkout of FreeType's Git mirror at the commit
-#              amiga/SOURCES pins, used when the release tarball can't be had
 #
 # Nothing upstream is ever committed: the sources are fetched and checked
 # here, and built in OUT_DIR/work.
@@ -57,19 +56,7 @@ fetch() {   # NAME: the tarball named in SOURCES, fetched if missing, then check
     echo "$3  $t" | sha256sum -c - >/dev/null || { echo "SHA-256 mismatch: $t" >&2; exit 2; }
 }
 
-rm -rf "$WORK/freetype" "$WORK/harfbuzz"
-if fetch freetype 2>/dev/null; then
-    set -- $(src_line freetype)
-    mkdir -p "$WORK/freetype" && tar -xJf "$TARBALLS/$2" -C "$WORK/freetype" --strip-components=1
-    echo "FreeType from $2 (SHA-256 checked)"
-else
-    set -- $(src_line freetype-git)
-    G=${FREETYPE_GIT:-}
-    [ -n "$G" ] || { echo "FreeType: no tarball, and FREETYPE_GIT not set (a clone of $4 at $2)" >&2; exit 2; }
-    [ "$(git -C "$G" rev-parse HEAD)" = "$3" ] || { echo "FreeType: $G is not at $3" >&2; exit 2; }
-    mkdir -p "$WORK/freetype" && git -C "$G" archive HEAD | tar -x -C "$WORK/freetype"
-    echo "FreeType from Git at $3 (commit checked)"
-fi
+rm -rf "$WORK/harfbuzz"
 fetch harfbuzz
 set -- $(src_line harfbuzz)
 mkdir -p "$WORK/harfbuzz" && tar -xJf "$TARBALLS/$2" -C "$WORK/harfbuzz" --strip-components=1
@@ -77,59 +64,25 @@ mkdir -p "$WORK/harfbuzz" && tar -xJf "$TARBALLS/$2" -C "$WORK/harfbuzz" --strip
 CPU="-m68040 -m68881"   # the 68040 and its own FPU (-m68040 alone gives soft float)
 COMMON="$CPU -O2 -fno-delete-null-pointer-checks -fno-common -ffunction-sections -fdata-sections -DNDEBUG"
 
-# ---- FreeType: the modules OpenFont needs, its memory from the library ----
-FT=$WORK/freetype
 HB=$WORK/harfbuzz
-CONF=$WORK/ft-config/freetype/config
-mkdir -p "$CONF"
-sed -e 's|^#define FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES|/* no environment: a library has none */|' \
-    -e 's|^#define FT_CONFIG_OPTION_USE_LZW|/* no LZW */|' \
-    -e 's|^#define FT_CONFIG_OPTION_USE_ZLIB|/* no zlib */|' \
-    -e 's|^#define FT_CONFIG_OPTION_MAC_FONTS|/* no Mac resource forks */|' \
-    -e 's|^#define FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK|/* no rforks */|' \
-    -e 's|^#define FT_CONFIG_OPTION_SVG|/* no OT-SVG yet */|' \
-    -e 's|^#define TT_CONFIG_OPTION_BDF|/* no BDF */|' \
-    "$FT/include/freetype/config/ftoption.h" > "$CONF/ftoption.h"
-cat > "$CONF/ftmodule.h" <<'EOF'
-/* openfont.library's FreeType modules: TrueType and CFF outlines (TTF,
- * OTF, collections), their hinting, and the two rasterisers. */
-FT_USE_MODULE( FT_Module_Class, autofit_module_class )
-FT_USE_MODULE( FT_Driver_ClassRec, tt_driver_class )
-FT_USE_MODULE( FT_Driver_ClassRec, cff_driver_class )
-FT_USE_MODULE( FT_Module_Class, psaux_module_class )
-FT_USE_MODULE( FT_Module_Class, psnames_module_class )
-FT_USE_MODULE( FT_Module_Class, pshinter_module_class )
-FT_USE_MODULE( FT_Module_Class, sfnt_module_class )
-FT_USE_MODULE( FT_Renderer_Class, ft_smooth_renderer_class )
-FT_USE_MODULE( FT_Renderer_Class, ft_raster1_renderer_class )
-EOF
-FTFLAGS="-I$WORK/ft-config -I$FT/include -DFT2_BUILD_LIBRARY -DFT_CONFIG_MODULES_H=<freetype/config/ftmodule.h> -DFT_CONFIG_OPTIONS_H=<freetype/config/ftoption.h>"
 OBJ=$WORK/obj
 mkdir -p "$OBJ"
-# SKIP_ENGINES=1 keeps FreeType's and HarfBuzz's objects from the last
-# build (they take most of the time) and rebuilds only OpenFont's own
+# SKIP_ENGINES=1 keeps HarfBuzz's object from the last build (it takes most
+# of the time) and rebuilds only OpenFont's own
 if [ "${SKIP_ENGINES:-0}" != 1 ] || [ ! -f "$OBJ/harfbuzz.o" ]; then
 rm -f "$OBJ"/*.o
-for f in base/ftbase base/ftinit base/ftbitmap base/ftglyph base/ftmm base/ftsynth base/ftdebug \
-         truetype/truetype cff/cff sfnt/sfnt smooth/smooth raster/raster \
-         psaux/psaux psnames/psnames pshinter/pshinter autofit/autofit; do
-    o=$OBJ/ft_$(echo "$f" | tr '/' '_').o
-    "$CC" $COMMON $NDKFLAGS $FTFLAGS -c "$FT/src/$f.c" -o "$o"
-done
-"$CC" $COMMON $NDKFLAGS $FTFLAGS -c "$ROOT/library/of_ftsystem.c" -o "$OBJ/of_ftsystem.o"
 
 # ---- HarfBuzz: one file, single-threaded under the library's lock ----
 HBFLAGS="-std=c++17 -Wno-attributes -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit \
- -DHAVE_FREETYPE=1 -DHB_NO_MT -DHB_NO_ATEXIT -DHB_NO_GETENV -DHB_NO_SETLOCALE \
+ -DHB_NO_MT -DHB_NO_ATEXIT -DHB_NO_GETENV -DHB_NO_SETLOCALE \
  -DHB_NO_BUFFER_SERIALIZE -DHB_NO_BUFFER_MESSAGE -DHB_NO_BUFFER_VERIFY -DHB_NO_CAIRO \
- -DHB_NO_OPEN -DHB_NO_MMAP -DHB_NO_ERRNO \
- -I$FT/include -I$WORK/ft-config"
+ -DHB_NO_OPEN -DHB_NO_MMAP -DHB_NO_ERRNO"
 "$CXX" $COMMON $NDKFLAGS $HBFLAGS -c "$HB/src/harfbuzz.cc" -o "$OBJ/harfbuzz.o"
 fi
 
 # ---- OpenFont: the core, the index, and the library around them ----
-OFFLAGS="-std=gnu99 -Wall -Wextra -Werror -I$ROOT/include -I$ROOT/src -I$ROOT/library -I$FT/include -I$WORK/ft-config -I$HB/src"
-for f in src/openfont src/openfont_cache src/openfont_index src/openfont_io_join; do
+OFFLAGS="-std=gnu99 -Wall -Wextra -Werror -I$ROOT/include -I$ROOT/src -I$ROOT/library -I$HB/src"
+for f in src/openfont src/of_font src/of_cff src/of_raster src/openfont_cache src/openfont_index src/openfont_io_join; do
     "$CC" $COMMON $NDKFLAGS $OFFLAGS -c "$ROOT/$f.c" -o "$OBJ/of_$(basename "$f").o"
 done
 # The library's own files include the OS headers, whose struct timeval is
@@ -144,7 +97,7 @@ done
 # ---- linking: no C startup; libnix only for its stateless functions ----
 "$CC" $CPU -nostartfiles -Wl,--gc-sections -Wl,-Map,"$OUT/openfont.library.map" \
     -o "$OUT/openfont.library" \
-    "$OBJ/aa_openfont_lib.o" "$OBJ"/of_*.o "$OBJ"/ft_*.o "$OBJ/harfbuzz.o" \
+    "$OBJ/aa_openfont_lib.o" "$OBJ"/of_*.o "$OBJ/harfbuzz.o" \
     -lc -lm -lgcc
 "$NM" -u "$OUT/openfont.library" > "$OUT/undefined.txt" || true
 # the first code in the file must be start(), which returns at once when
@@ -163,8 +116,6 @@ sha256sum "$OUT/openfont.library"
 # the licences that go with the library wherever it is copied
 mkdir -p "$OUT/licences"
 cp "$ROOT/LICENSE" "$OUT/licences/OpenFont.txt"
-cp "$FT/LICENSE.TXT" "$OUT/licences/FreeType-LICENSE.txt"
-cp "$FT/docs/FTL.TXT" "$OUT/licences/FreeType-FTL.txt"
 cp "$HB/COPYING" "$OUT/licences/HarfBuzz.txt"
 
 # ---- the SDK's link library (the varargs calls), and the lab test ----

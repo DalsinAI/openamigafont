@@ -4,13 +4,14 @@ OpenFont is the native modern font service for the Open Amiga stack.
 
 It gives Amiga applications one API for font discovery, shaping, measurement,
 glyph rasterisation and compiled glyph caches. The production architecture
-removes direct application dependencies on FreeType, HarfBuzz and fontconfig:
-those projects are reference/implementation technology behind OpenFont while
-applications call OpenFont.
+removes direct application dependencies on FreeType, HarfBuzz and fontconfig.
+OpenFont reads and draws fonts with its own code, written from the published
+specifications; HarfBuzz still shapes inside it until OpenFont's own shaper
+replaces it.
 
 Current phase: **the resident library, a preview**. `openfont.library` 1.0 is
-OpenFont for AmigaOS 3.2 on the 68040, with FreeType 2.14.3 and HarfBuzz
-14.5.1 inside it. It finds fonts by family through its own font index, and a
+OpenFont for AmigaOS 3.2 on the 68040, with its own font reader and
+rasteriser and HarfBuzz 14.5.1 inside it. It finds fonts by family through its own font index, and a
 face falls back to others for the characters it has no glyphs for. Its calls
 may still change until version 2. The same core builds on the x86 and ARM64
 cores, where the tests run. Glyph lookup in a compiled cache does not walk the
@@ -49,6 +50,36 @@ the host tests call:
 - A8 glyph rasterisation;
 - a portable compiled bitmap-cache writer and reader.
 
+### The reader and the rasteriser
+
+[src/of_font.h](src/of_font.h) is OpenFont's own font reader and outline
+rasteriser, written from the OpenType specification and Adobe's CFF and
+Type 2 charstring specifications. No FreeType code is in them, copied or
+translated.
+
+- **Fonts:** TrueType and OpenType files and collections (`.ttf`, `.otf`,
+  `.ttc`, `.otc`). Tables `cmap` (formats 0, 4, 6, 12, 13), `head`, `hhea`,
+  `hmtx`, `maxp`, `loca`/`glyf` (simple and composite glyphs), `CFF `
+  (Type 2 charstrings, subroutines, CID-keyed fonts), `name`, `OS/2` and
+  `post`. A font without outlines it reads (CFF2, bitmaps only) still opens,
+  for its cmap and metrics.
+- **Rasteriser** ([src/of_raster.c](src/of_raster.c)): quadratic and cubic
+  outlines to A8 coverage with the non-zero rule, exact area coverage at 256
+  subpixels a pixel, curves cut into lines no more than 1/16 pixel from them.
+  No hinting. Integer arithmetic only, the same to the bit on the host and the
+  68040, and a pure function of an outline, so it can move to OpenGPU as it is.
+- **Metrics:** advances and the line metrics in 26.6 at a pixel size, not
+  rounded to whole pixels; a glyph's bitmap is its outline's control box
+  rounded out.
+
+Every read is checked against the file's end, and a damaged font gives
+`OF_ERR_FONT`, never a crash: `test_reader` opens and draws fonts cut short
+and with bytes changed, under the address and undefined-behaviour sanitisers
+on the host.
+
+Glyphs are unhinted: the pixels follow the outline exactly at every size. That
+is a change from the hinted FreeType output before.
+
 [src/openfont_index.h](src/openfont_index.h) is the font index: the faces of
 a few folders by family, style, weight and slant, kept in a text file and read
 again only when a folder's date changes; aliases (`Arial` to Liberation Sans,
@@ -65,7 +96,9 @@ hit.
 
 ## Build on the x86 or ARM64 cores
 
-Requirements: CMake, pkg-config, FreeType and HarfBuzz development packages.
+Requirements: CMake, and HarfBuzz: its development package (pkg-config), or
+its release's sources (`-DOPENFONT_HARFBUZZ_SOURCE=/path/to/harfbuzz-14.5.1`,
+built in). FreeType is not needed.
 The index test needs the DejaVu and Liberation fonts (`fonts-dejavu-core`,
 `fonts-liberation2` on Debian and Ubuntu), and is left out without them.
 
@@ -74,6 +107,28 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+The reference gate compares the reader and rasteriser with FreeType 2.14.3,
+unhinted, when given a FreeType tree built in its own `build/` folder (only
+for this test; nothing of FreeType's is linked into OpenFont):
+
+```sh
+cmake -S . -B build -DOPENFONT_FREETYPE_REF=/path/to/freetype-2.14.3
+build/compare_freetype FONT...
+```
+
+For each font, face and size (9, 12, 16, 24 and 48 pixels) it must match
+FreeType exactly in the cmap (every codepoint to U+2FFFF), the family and
+style names, the bold, italic, fixed-pitch and colour flags, the line metrics
+and every glyph's advance, bitmap size and place; and each pixel within 64 of
+255, the mean difference within 2.5. The pixels differ because the two cut
+curves into lines differently: measured against a near-exact raster (1/256
+pixel), OpenFont is the closer, FreeType's own error reaching 57 in a pixel
+and a mean of 2.6 on CFF fonts at 9 pixels.
+
+On 17 October 2026 it passed on 63 font files of this PC: DejaVu and
+Liberation (TrueType), the URW base 35 fonts (CFF), and the Noto CJK
+collections (CID-keyed CFF, two faces of each), 335 font sizes.
 
 Compile common sizes:
 
@@ -118,6 +173,12 @@ OpenAmigaGCC releases is named 16.2.9-open2. The script looks in
 `-O2 -Wall -Wextra -Werror`, soft float through `toolchain/m68k-soft-m68040.specs`
 (libnix's soft maths, not libm881), so it also runs on an LC or EC040.
 
+It also builds `openfontreader-68040`, the reader and rasteriser's test
+(`tests/test_reader.c`). It prints a fingerprint of every glyph's bitmap, place
+and advance at 12 and 16 pixels for each font. On lab t4-a (OS 3.2.3, 17 Oct
+2026) it printed the host's fingerprints for DejaVu Sans, Liberation Serif
+Italic and Nimbus Sans (CFF), and `test_reader: ok`.
+
 `src/openfont_omc.c` is not in that build unless `OMC_INC` points at a
 directory that contains the NDK and `libraries/openmulticore.h`. The stove has
 those. The compiler release tarball does not, so the script does not invent
@@ -138,12 +199,12 @@ that: it does not open on another CPU, or on a 68040 without its FPU (an
 LC040). Later, AC090 leaves may take shaping,
 glyph rasterisation and atlas building, with the same results.
 
-It holds the core, the index, FreeType (TrueType and CFF outlines, their
-hinting, both rasterisers) and HarfBuzz, about 1.4 MB. Inside it:
+It holds the core, the index, OpenFont's reader and rasteriser, and HarfBuzz,
+about 1.0 MB. Inside it:
 
 - one lock: calls from several tasks are taken one at a time;
 - its own 64 KB stack, so callers need no more than their usual;
-- one memory pool for everything FreeType, HarfBuzz and the core allocate,
+- one memory pool for everything HarfBuzz and the core allocate,
   freed whole when the library is expunged;
 - no C startup and no stdio; files through dos.library, only for processes
   (a plain task gets `OFERR_NOTPROCESS`);
@@ -192,11 +253,9 @@ NDK=/path/to/OpenNDK/Include_H sh amiga/build-library.sh
 
 - `CC`, `CXX`: the compilers, when not in the stove or under `/opt`;
 - `NDK`: AmigaOS headers, when the compiler has none of its own;
-- `TARBALLS`: where the FreeType and HarfBuzz releases are kept. Each is
-  checked against [amiga/SOURCES](amiga/SOURCES), and fetched when missing.
-  Nothing upstream is ever committed;
-- `FREETYPE_GIT`: a clone of FreeType's Git mirror at the commit SOURCES pins,
-  when the release can't be fetched.
+- `TARBALLS`: where the HarfBuzz release is kept. It is checked against
+  [amiga/SOURCES](amiga/SOURCES), and fetched when missing. Nothing upstream
+  is ever committed.
 
 It writes `build/amiga/openfont.library`, its link map, `libopenfont.a` and
 `OpenFontLibTest`. It fails when the library leaves a symbol undefined (libnix
@@ -217,7 +276,9 @@ fonts, and `CACHE` an `.ofc` made from `FONT` on the host. It shapes and
 rasterises `FONT` at 16 pixels and expects the host's glyphs, advance and
 pixels byte for byte (the host's `test_openfont` prints the same hash), then checks the
 index, the aliases, the snowman from a fallback and `OFERR_NOTPROCESS` from a
-plain task. It ends with `OPENFONTLIB PASS`. It has not yet run on a lab.
+plain task. It ends with `OPENFONTLIB PASS`. It has not yet passed on a lab:
+on lab t4-a (17 Oct 2026) it stops before its first line of output, with this
+library and with the FreeType one before it alike.
 
 ## Compatibility
 
@@ -225,11 +286,8 @@ FreeType/HarfBuzz compatibility headers will be provided for the subset needed
 by existing ports, but they are compatibility front ends. New Open software
 uses OpenFont directly.
 
-MIT licensed AmigaChrome Team code. FreeType and HarfBuzz retain their own upstream
-licences when used to build the bootstrap/reference implementation, and in
-`openfont.library`, which carries FreeType under the FreeType License (FTL)
-and HarfBuzz under its MIT licence. The build copies those licences to
-`build/amiga/licences`; they go wherever the library is copied.
-
-Portions of openfont.library are copyright © 2026 The FreeType Project
-(https://freetype.org). All rights reserved.
+MIT licensed AmigaChrome Team code. HarfBuzz keeps its own upstream licence
+(MIT) in `openfont.library`, until OpenFont's own shaper replaces it; the
+build copies it to `build/amiga/licences`, and it goes wherever the library
+is copied. FreeType is no longer in OpenFont; the reference test builds
+against a separate FreeType tree.

@@ -116,7 +116,7 @@ OFFace *of_face_open(OFContext *ctx, const char *path);
 /* The face_index-th face of a file (a .ttc or .otc holds several). */
 OFFace *of_face_open_index(OFContext *ctx, const char *path, uint32_t face_index);
 /* The same, with why it failed in *error when error is not NULL:
- * OF_ERR_IO (the file), OF_ERR_MEMORY, OF_ERR_FONT (not a font FreeType
+ * OF_ERR_IO (the file), OF_ERR_MEMORY, OF_ERR_FONT (not a font OpenFont
  * reads), OF_ERR_ARGUMENT. */
 OFFace *of_face_open_file(OFContext *ctx, const char *path, uint32_t face_index, int *error);
 /* A face from a font in memory. With take set, the face frees data with
