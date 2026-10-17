@@ -29,7 +29,7 @@ for cpu in 68000 68020 68040; do
     "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
         -I "$ROOT/include" -I "$ROOT/src" \
         -o "$OUT/openfontrange-$cpu" \
-        "$ROOT/tests/test_range.c" "$ROOT/src/openfont_cache.c"
+        "$ROOT/tests/test_range.c" "$ROOT/src/openfont_cache.c" "$ROOT/src/openfont_io_stdio.c" "$ROOT/src/openfont_io_join.c"
     echo "$OUT/openfontrange-$cpu ($(wc -c < "$OUT/openfontrange-$cpu") bytes)"
 done
 
@@ -41,7 +41,7 @@ if [ -n "${OMC_INC:-}" ]; then
         "$CC" -m"$cpu" -O2 -Wall -Wextra -Werror \
             -I "$ROOT/include" -I "$ROOT/src" -I "$OMC_INC" \
             -o "$OUT/openfontomc-$cpu" \
-            "$ROOT/tests/test_omc.c" "$ROOT/src/openfont_omc.c" "$ROOT/src/openfont_cache.c"
+            "$ROOT/tests/test_omc.c" "$ROOT/src/openfont_omc.c" "$ROOT/src/openfont_cache.c" "$ROOT/src/openfont_io_stdio.c" "$ROOT/src/openfont_io_join.c"
         echo "$OUT/openfontomc-$cpu ($(wc -c < "$OUT/openfontomc-$cpu") bytes)"
     done
 fi

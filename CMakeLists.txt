@@ -8,7 +8,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
 
-add_library(openfont STATIC src/openfont.c src/openfont_cache.c)
+add_library(openfont STATIC src/openfont.c src/openfont_cache.c src/openfont_io_stdio.c src/openfont_io_join.c src/openfont_io_posixdir.c src/openfont_index.c)
 target_include_directories(openfont PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(openfont PRIVATE PkgConfig::FREETYPE PkgConfig::HARFBUZZ)
 
@@ -41,3 +41,14 @@ if(OPENFONT_TEST_FONT)
                      ${CMAKE_CURRENT_BINARY_DIR}/roundtrip.ofc)
 endif()
 add_test(NAME openfont_range COMMAND test_range)
+
+add_executable(test_index tests/test_index.c)
+target_include_directories(test_index PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_index PRIVATE openfont)
+find_path(OPENFONT_DEJAVU_DIR DejaVuSans.ttf PATHS /usr/share/fonts/truetype/dejavu)
+find_path(OPENFONT_LIBERATION_DIR LiberationSans-Regular.ttf
+    PATHS /usr/share/fonts/truetype/liberation2 /usr/share/fonts/truetype/liberation)
+if(OPENFONT_DEJAVU_DIR AND OPENFONT_LIBERATION_DIR)
+    add_test(NAME openfont_index COMMAND test_index ${CMAKE_CURRENT_BINARY_DIR}/fonts.index
+             ${OPENFONT_DEJAVU_DIR} ${OPENFONT_LIBERATION_DIR})
+endif()

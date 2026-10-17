@@ -1,12 +1,13 @@
 #include "openfont/openfont.h"
 #include "openfont_internal.h"
+#include "openfont_io.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_TRUETYPE_TABLES_H
 #include <hb.h>
 #include <hb-ft.h>
 
@@ -19,45 +20,23 @@ struct OFFace {
     FT_Face ft_face;
     hb_font_t *hb_font;
     uint32_t pixel_size;
-    char *path;
+    uint32_t refs;
+    uint8_t *data;                  /* the font file, owned when take was set */
+    int owns_data;
     uint64_t source_fingerprint;
+    uint32_t nfallbacks;
+    OFFace *fallbacks[OF_MAX_FALLBACKS];
 };
 
-static char *of_strdup(const char *s)
-{
-    size_t n;
-    char *p;
-    if (!s)
-        return NULL;
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p)
-        memcpy(p, s, n);
-    return p;
-}
-
 /* FNV-1a is used only as a stale-cache fingerprint, not as a security hash. */
-static uint64_t fingerprint_path(const char *path)
+static uint64_t fingerprint_bytes(const uint8_t *p, size_t n)
 {
-    FILE *f;
-    uint8_t buf[4096];
-    size_t n, i;
     uint64_t h = UINT64_C(14695981039346656037);
-
-    if (!path)
-        return 0;
-    f = fopen(path, "rb");
-    if (!f)
-        return 0;
-    while ((n = fread(buf, 1, sizeof buf, f)) != 0) {
-        for (i = 0; i < n; ++i) {
-            h ^= buf[i];
-            h *= UINT64_C(1099511628211);
-        }
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= UINT64_C(1099511628211);
     }
-    if (ferror(f))
-        h = 0;
-    fclose(f);
     return h;
 }
 
@@ -81,33 +60,41 @@ void of_context_destroy(OFContext *ctx)
     free(ctx);
 }
 
-OFFace *of_face_open(OFContext *ctx, const char *path)
+OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
+                            uint32_t face_index, int take)
 {
     OFFace *face;
-    if (!ctx || !path)
-        return NULL;
-    face = (OFFace *)calloc(1, sizeof(*face));
-    if (!face)
-        return NULL;
-    face->ctx = ctx;
-    face->path = of_strdup(path);
-    if (!face->path) {
-        free(face);
+    if (!ctx || !data || !size) {
+        if (take)
+            free(data);
         return NULL;
     }
-    if (FT_New_Face(ctx->ft, path, 0, &face->ft_face)) {
-        free(face->path);
+    face = (OFFace *)calloc(1, sizeof(*face));
+    if (!face) {
+        if (take)
+            free(data);
+        return NULL;
+    }
+    face->ctx = ctx;
+    face->refs = 1;
+    face->data = data;
+    face->owns_data = take;
+    if (FT_New_Memory_Face(ctx->ft, data, (FT_Long)size, (FT_Long)face_index, &face->ft_face)) {
+        if (take)
+            free(data);
         free(face);
         return NULL;
     }
     face->hb_font = hb_ft_font_create_referenced(face->ft_face);
     if (!face->hb_font) {
         FT_Done_Face(face->ft_face);
-        free(face->path);
+        if (take)
+            free(data);
         free(face);
         return NULL;
     }
-    face->source_fingerprint = fingerprint_path(path);
+    /* the file and the face in it: two faces of one collection differ */
+    face->source_fingerprint = fingerprint_bytes(data, size) ^ ((uint64_t)face_index * UINT64_C(0x9E3779B97F4A7C15));
     if (of_face_set_pixel_size(face, 16) != OF_OK) {
         of_face_close(face);
         return NULL;
@@ -115,13 +102,35 @@ OFFace *of_face_open(OFContext *ctx, const char *path)
     return face;
 }
 
+OFFace *of_face_open_index(OFContext *ctx, const char *path, uint32_t face_index)
+{
+    uint8_t *data = NULL;
+    size_t size = 0;
+    if (!ctx || !path)
+        return NULL;
+    if (of_io_read_all(path, &data, &size) != OF_OK)
+        return NULL;
+    return of_face_open_memory(ctx, data, size, face_index, 1);
+}
+
+OFFace *of_face_open(OFContext *ctx, const char *path)
+{
+    return of_face_open_index(ctx, path, 0);
+}
+
 void of_face_close(OFFace *face)
 {
-    if (!face)
+    uint32_t i;
+    if (!face || !face->refs)
         return;
+    if (--face->refs)
+        return;
+    for (i = 0; i < face->nfallbacks; ++i)
+        of_face_close(face->fallbacks[i]);
     hb_font_destroy(face->hb_font);
     FT_Done_Face(face->ft_face);
-    free(face->path);
+    if (face->owns_data)
+        free(face->data);
     free(face);
 }
 
@@ -129,6 +138,8 @@ int of_face_set_pixel_size(OFFace *face, uint32_t pixels)
 {
     if (!face || !pixels)
         return OF_ERR_ARGUMENT;
+    if (face->pixel_size == pixels)
+        return OF_OK;
     if (FT_Set_Pixel_Sizes(face->ft_face, 0, pixels))
         return OF_ERR_FONT;
     hb_ft_font_changed(face->hb_font);
@@ -136,56 +147,336 @@ int of_face_set_pixel_size(OFFace *face, uint32_t pixels)
     return OF_OK;
 }
 
-size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
-                     OFGlyph *out, size_t capacity)
+static void copy_name(char *out, size_t size, const char *in)
+{
+    size_t n = in ? strlen(in) : 0;
+    if (n >= size)
+        n = size - 1;
+    if (n)
+        memcpy(out, in, n);
+    out[n] = 0;
+}
+
+int of_face_info(OFFace *face, OFFaceInfo *info)
+{
+    FT_Face f;
+    TT_OS2 *os2;
+    if (!face || !info)
+        return OF_ERR_ARGUMENT;
+    f = face->ft_face;
+    memset(info, 0, sizeof(*info));
+    copy_name(info->family, sizeof info->family, f->family_name);
+    copy_name(info->style, sizeof info->style, f->style_name);
+    os2 = (TT_OS2 *)FT_Get_Sfnt_Table(f, FT_SFNT_OS2);
+    if (os2 && os2->version != 0xFFFFu) {
+        info->weight = os2->usWeightClass;
+        info->width = os2->usWidthClass;
+        info->unicode_ranges[0] = (uint32_t)os2->ulUnicodeRange1;
+        info->unicode_ranges[1] = (uint32_t)os2->ulUnicodeRange2;
+        info->unicode_ranges[2] = (uint32_t)os2->ulUnicodeRange3;
+        info->unicode_ranges[3] = (uint32_t)os2->ulUnicodeRange4;
+    }
+    if (!info->weight)
+        info->weight = (f->style_flags & FT_STYLE_FLAG_BOLD) ? 700 : 400;
+    if (!info->width)
+        info->width = 5;
+    if (f->style_flags & FT_STYLE_FLAG_ITALIC)
+        info->flags |= OF_FACE_ITALIC;
+    if (FT_IS_FIXED_WIDTH(f))
+        info->flags |= OF_FACE_FIXED;
+    if (FT_IS_SCALABLE(f))
+        info->flags |= OF_FACE_SCALABLE;
+    if (FT_HAS_COLOR(f))
+        info->flags |= OF_FACE_COLOR;
+    info->units_per_em = f->units_per_EM;
+    info->pixel_size = face->pixel_size;
+    info->num_glyphs = (uint32_t)f->num_glyphs;
+    info->num_faces = (uint32_t)f->num_faces;
+    if (f->size) {
+        info->ascender_26_6 = (int32_t)f->size->metrics.ascender;
+        info->descender_26_6 = (int32_t)f->size->metrics.descender;
+        info->height_26_6 = (int32_t)f->size->metrics.height;
+    }
+    return OF_OK;
+}
+
+uint32_t of_face_char_index(OFFace *face, uint32_t codepoint)
+{
+    return face ? (uint32_t)FT_Get_Char_Index(face->ft_face, codepoint) : 0;
+}
+
+int of_face_add_fallback(OFFace *face, OFFace *fallback)
+{
+    uint32_t i;
+    if (!face || !fallback || fallback == face)
+        return OF_ERR_ARGUMENT;
+    for (i = 0; i < fallback->nfallbacks; ++i)
+        if (fallback->fallbacks[i] == face)
+            return OF_ERR_ARGUMENT;     /* no loops: a chain is one level deep */
+    if (face->nfallbacks >= OF_MAX_FALLBACKS)
+        return OF_ERR_RANGE;
+    fallback->refs++;
+    face->fallbacks[face->nfallbacks++] = fallback;
+    return OF_OK;
+}
+
+uint32_t of_face_fallback_count(const OFFace *face)
+{
+    return face ? face->nfallbacks : 0;
+}
+
+OFFace *of_face_fallback(OFFace *face, uint32_t n)
+{
+    if (!face)
+        return NULL;
+    if (n == 0)
+        return face;
+    return n <= face->nfallbacks ? face->fallbacks[n - 1] : NULL;
+}
+
+/* ---- reading a face's tables through a stream (the index) ---- */
+
+static unsigned long stream_read(FT_Stream stream, unsigned long offset,
+                                 unsigned char *buffer, unsigned long count)
+{
+    OFFile *f = (OFFile *)stream->descriptor.pointer;
+    if (!count)
+        return offset <= stream->size ? 0 : 1;  /* a seek: 0 is success */
+    return of_io_read_at(f, (uint32_t)offset, buffer, (uint32_t)count);
+}
+
+static void stream_close(FT_Stream stream)
+{
+    of_io_close((OFFile *)stream->descriptor.pointer);
+    stream->descriptor.pointer = NULL;
+}
+
+int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceInfo *info)
+{
+    FT_StreamRec *stream;
+    FT_Open_Args args;
+    OFFace face;
+    uint32_t size = 0;
+    OFFile *f;
+    int rc;
+
+    if (!ctx || !path || !info)
+        return OF_ERR_ARGUMENT;
+    f = of_io_open(path, &size);
+    if (!f)
+        return OF_ERR_IO;
+    /* FreeType keeps the stream until the face is done, and closes it */
+    stream = (FT_StreamRec *)calloc(1, sizeof(*stream));
+    if (!stream) {
+        of_io_close(f);
+        return OF_ERR_MEMORY;
+    }
+    stream->size = size;
+    stream->descriptor.pointer = f;
+    stream->read = stream_read;
+    stream->close = stream_close;
+    memset(&args, 0, sizeof args);
+    args.flags = FT_OPEN_STREAM;
+    args.stream = stream;
+    memset(&face, 0, sizeof face);
+    if (FT_Open_Face(ctx->ft, &args, (FT_Long)face_index, &face.ft_face)) {
+        /* FT_Open_Face closes a stream it was given, even on failure */
+        free(stream);
+        return OF_ERR_FONT;
+    }
+    rc = of_face_info(&face, info);
+    FT_Done_Face(face.ft_face);
+    free(stream);
+    return rc;
+}
+
+/* ---- shaping, with fallback by cluster ---- */
+
+typedef struct GlyphVec {
+    OFGlyph *g;
+    size_t n, cap;
+    int failed;
+} GlyphVec;
+
+static void vec_push(GlyphVec *v, const OFGlyph *g)
+{
+    if (v->failed)
+        return;
+    if (v->n == v->cap) {
+        size_t cap = v->cap ? v->cap * 2 : 64;
+        OFGlyph *ng = (OFGlyph *)realloc(v->g, cap * sizeof(*ng));
+        if (!ng) {
+            v->failed = 1;
+            return;
+        }
+        v->g = ng;
+        v->cap = cap;
+    }
+    v->g[v->n++] = *g;
+}
+
+/* Shapes text[off, off + len) with face, the whole text as its context, and
+ * appends the glyphs, each marked as from face_no. */
+static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t bytes,
+                      size_t off, size_t len, GlyphVec *out)
 {
     hb_buffer_t *buffer;
     hb_glyph_info_t *info;
     hb_glyph_position_t *pos;
     unsigned count = 0, i;
-    if (!face || !utf8)
-        return 0;
+
     buffer = hb_buffer_create();
-    if (!buffer)
-        return 0;
-    hb_buffer_add_utf8(buffer, utf8, (int)bytes, 0, (int)bytes);
+    if (!hb_buffer_allocation_successful(buffer)) {
+        hb_buffer_destroy(buffer);
+        return OF_ERR_MEMORY;
+    }
+    hb_buffer_add_utf8(buffer, utf8, (int)bytes, (unsigned)off, (int)len);
     hb_buffer_guess_segment_properties(buffer);
     hb_shape(face->hb_font, buffer, NULL, 0);
+    if (!hb_buffer_allocation_successful(buffer)) {
+        hb_buffer_destroy(buffer);
+        return OF_ERR_MEMORY;
+    }
     info = hb_buffer_get_glyph_infos(buffer, &count);
     pos = hb_buffer_get_glyph_positions(buffer, &count);
-    if (out && capacity) {
-        unsigned n = count < capacity ? count : (unsigned)capacity;
-        for (i = 0; i < n; ++i) {
-            out[i].glyph_id = info[i].codepoint;
-            out[i].cluster = info[i].cluster;
-            out[i].x_advance_26_6 = pos[i].x_advance;
-            out[i].y_advance_26_6 = pos[i].y_advance;
-            out[i].x_offset_26_6 = pos[i].x_offset;
-            out[i].y_offset_26_6 = pos[i].y_offset;
-        }
+    for (i = 0; i < count; ++i) {
+        OFGlyph g;
+        g.glyph_id = info[i].codepoint;
+        g.cluster = info[i].cluster;
+        g.x_advance_26_6 = pos[i].x_advance;
+        g.y_advance_26_6 = pos[i].y_advance;
+        g.x_offset_26_6 = pos[i].x_offset;
+        g.y_offset_26_6 = pos[i].y_offset;
+        g.face = face_no;
+        g.flags = (hb_glyph_info_get_glyph_flags(&info[i]) & HB_GLYPH_FLAG_UNSAFE_TO_BREAK)
+                  ? OF_GLYPH_UNSAFE_TO_BREAK : 0;
+        vec_push(out, &g);
     }
     hb_buffer_destroy(buffer);
-    return count;
+    return out->failed ? OF_ERR_MEMORY : OF_OK;
+}
+
+/* Shapes text[off, off + len) with the chain's level-th face. Every whole
+ * cluster that face has no glyph for is shaped again with the next one;
+ * what the last face can't show stays glyph 0 of the face shaped first. */
+static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t bytes,
+                       size_t off, size_t len, GlyphVec *out)
+{
+    OFFace *face = level ? root->fallbacks[level - 1] : root;
+    GlyphVec tmp;
+    unsigned char *missing;
+    size_t i, k;
+    int rc;
+
+    memset(&tmp, 0, sizeof tmp);
+    if (level && of_face_set_pixel_size(face, root->pixel_size) != OF_OK)
+        return OF_ERR_FONT;
+    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, &tmp);
+    if (rc != OF_OK) {
+        free(tmp.g);
+        return rc;
+    }
+    if (!tmp.n) {
+        free(tmp.g);
+        return OF_OK;
+    }
+    missing = (unsigned char *)calloc(tmp.n, 1);
+    if (!missing) {
+        free(tmp.g);
+        return OF_ERR_MEMORY;
+    }
+    /* a cluster is missing when any glyph of it is glyph 0; a cluster's
+     * glyphs are next to each other in the run */
+    for (i = 0; i < tmp.n; ++i) {
+        if (tmp.g[i].glyph_id)
+            continue;
+        missing[i] = 1;
+        for (k = i; k > 0 && tmp.g[k - 1].cluster == tmp.g[i].cluster; --k)
+            missing[k - 1] = 1;
+        for (k = i + 1; k < tmp.n && tmp.g[k].cluster == tmp.g[i].cluster; ++k)
+            missing[k] = 1;
+    }
+    for (i = 0; i < tmp.n;) {
+        size_t j;
+        uint32_t cmin, cmax, end;
+        if (!missing[i]) {
+            vec_push(out, &tmp.g[i]);
+            ++i;
+            continue;
+        }
+        for (j = i; j < tmp.n && missing[j]; ++j)
+            ;
+        cmin = cmax = tmp.g[i].cluster;
+        for (k = i; k < j; ++k) {
+            if (tmp.g[k].cluster < cmin)
+                cmin = tmp.g[k].cluster;
+            if (tmp.g[k].cluster > cmax)
+                cmax = tmp.g[k].cluster;
+        }
+        /* the run ends where the next cluster after it begins */
+        end = (uint32_t)(off + len);
+        for (k = 0; k < tmp.n; ++k)
+            if (tmp.g[k].cluster > cmax && tmp.g[k].cluster < end)
+                end = tmp.g[k].cluster;
+        if (level < root->nfallbacks) {
+            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, out);
+            if (rc != OF_OK)
+                break;
+        } else {
+            for (k = i; k < j; ++k) {
+                OFGlyph g = tmp.g[k];
+                if (level) {
+                    /* none of the chain has it: the first face's glyph 0 */
+                    g.face = 0;
+                }
+                if (!g.glyph_id)
+                    g.flags |= OF_GLYPH_MISSING;
+                vec_push(out, &g);
+            }
+        }
+        i = j;
+    }
+    free(missing);
+    free(tmp.g);
+    if (rc == OF_OK && out->failed)
+        rc = OF_ERR_MEMORY;
+    return rc;
+}
+
+size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
+                     OFGlyph *out, size_t capacity)
+{
+    GlyphVec v;
+    size_t n;
+    if (!face || !utf8 || !bytes)
+        return 0;
+    memset(&v, 0, sizeof v);
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &v) != OF_OK) {
+        free(v.g);
+        return 0;
+    }
+    n = v.n;
+    if (out && capacity)
+        memcpy(out, v.g, (n < capacity ? n : capacity) * sizeof(*out));
+    free(v.g);
+    return n;
 }
 
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes)
 {
-    size_t n, i;
-    OFGlyph *glyphs;
+    GlyphVec v;
+    size_t i;
     int64_t total = 0;
-    n = of_shape_utf8(face, utf8, bytes, NULL, 0);
-    if (!n)
+    if (!face || !utf8 || !bytes)
         return 0;
-    glyphs = (OFGlyph *)malloc(n * sizeof(*glyphs));
-    if (!glyphs)
-        return 0;
-    if (of_shape_utf8(face, utf8, bytes, glyphs, n) != n) {
-        free(glyphs);
+    memset(&v, 0, sizeof v);
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &v) != OF_OK) {
+        free(v.g);
         return 0;
     }
-    for (i = 0; i < n; ++i)
-        total += glyphs[i].x_advance_26_6;
-    free(glyphs);
+    for (i = 0; i < v.n; ++i)
+        total += v.g[i].x_advance_26_6;
+    free(v.g);
     return total;
 }
 

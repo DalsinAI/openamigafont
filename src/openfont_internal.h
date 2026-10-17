@@ -26,6 +26,10 @@ int of_cache_write(const char *path, uint64_t fingerprint,
                    uint32_t first_codepoint, uint32_t last_codepoint,
                    const OFCacheSizeIn *sizes, size_t size_count);
 
+/* What the index needs of a face in a file, read through a stream so only
+ * the tables it asks for are read. OF_OK and info filled (num_faces too). */
+int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceInfo *info);
+
 /* The one Fast RAM block a job must be granted to read the cache. */
 void of_cache_memory(const OFCache *cache, const void **addr, size_t *length);
 

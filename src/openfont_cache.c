@@ -1,6 +1,6 @@
 #include "openfont_internal.h"
+#include "openfont_io.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -253,30 +253,17 @@ void of_cache_memory(const OFCache *cache, const void **addr, size_t *length)
 
 OFCache *of_cache_open(const char *path)
 {
-    FILE *f;
-    long n;
+    size_t n = 0;
     uint8_t *file = NULL;
-    size_t got, payload = 0;
+    size_t payload = 0;
     OFCache scratch, *cache = NULL;
     uint32_t span;
 
     if (!path)
         return NULL;
-    f = fopen(path, "rb");
-    if (!f)
+    if (of_io_read_all(path, &file, &n) != OF_OK)
         return NULL;
-    if (fseek(f, 0, SEEK_END) || (n = ftell(f)) <= 0 || fseek(f, 0, SEEK_SET)) {
-        fclose(f);
-        return NULL;
-    }
-    file = (uint8_t *)malloc((size_t)n);
-    if (!file) {
-        fclose(f);
-        return NULL;
-    }
-    got = fread(file, 1, (size_t)n, f);
-    fclose(f);
-    if (got != (size_t)n || !header_of(file, (size_t)n, &scratch, &payload)) {
+    if (!n || !header_of(file, n, &scratch, &payload)) {
         free(file);
         return NULL;
     }
@@ -556,7 +543,6 @@ int of_cache_write(const char *path, uint64_t fingerprint,
 {
     struct Buf body, dir, rec_off;
     size_t s, i, span;
-    FILE *f;
     int rc = OF_ERR_MEMORY;
 
     if (!path || !sizes || !size_count || size_count > OF_CACHE_MAX_SIZES ||
@@ -629,25 +615,8 @@ int of_cache_write(const char *path, uint64_t fingerprint,
             free(file.p);
             goto done;
         }
-        f = fopen(path, "wb");
-        if (!f) {
-            free(file.p);
-            rc = OF_ERR_IO;
-            goto done;
-        }
-        if (fwrite(file.p, 1, file.n, f) != file.n) {
-            fclose(f);
-            free(file.p);
-            rc = OF_ERR_IO;
-            goto done;
-        }
-        if (fclose(f)) {
-            free(file.p);
-            rc = OF_ERR_IO;
-            goto done;
-        }
+        rc = of_io_write_all(path, file.p, file.n);
         free(file.p);
-        rc = OF_OK;
     }
 
 done:
