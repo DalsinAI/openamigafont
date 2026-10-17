@@ -71,7 +71,7 @@ int main(int argc, char **argv)
             break;
     expect(i == ix.count, "entries round-trip");
 
-    face = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 1);
+    face = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 1, NULL);
     expect(face != NULL, "open with fallbacks");
     expect(of_face_fallback_count(face) >= 1, "a fallback chain");
     of_face_set_pixel_size(face, 16);
@@ -98,7 +98,7 @@ int main(int argc, char **argv)
      * with its own advance, not the last fallback's */
     {
         static const char none[] = "\xF4\x8F\xBF\xBD";     /* U+10FFFD */
-        OFFace *alone = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 0);
+        OFFace *alone = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 0, NULL);
         OFGlyph a[4], c[4];
         expect(alone && of_face_fallback_count(alone) == 0, "a face with no fallbacks");
         if (alone) {
@@ -115,9 +115,9 @@ int main(int argc, char **argv)
 
     /* no loops in the fallback graph, however long */
     {
-        OFFace *fa = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0);
-        OFFace *fb = of_index_open(&ix, ctx, "DejaVu Serif", 400, 0, 0);
-        OFFace *fc = of_index_open(&ix, ctx, "Liberation Mono", 400, 0, 0);
+        OFFace *fa = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);
+        OFFace *fb = of_index_open(&ix, ctx, "DejaVu Serif", 400, 0, 0, NULL);
+        OFFace *fc = of_index_open(&ix, ctx, "Liberation Mono", 400, 0, 0, NULL);
         expect(fa && fb && fc, "three faces");
         if (fa && fb && fc) {
             expect(of_face_add_fallback(fa, fa) == OF_ERR_ARGUMENT, "not to itself");
@@ -143,6 +143,61 @@ int main(int argc, char **argv)
         expect(of_index_scan(&ix3, ctx) == OF_OK && ix3.count > 0, "scan with a folder that isn't one");
         expect(of_index_stale(&ix3), "it is read again next time");
         of_index_free(&ix3);
+    }
+
+    /* an index file cut short is refused */
+    {
+        OFIndex ix4;
+        FILE *in = fopen(argv[1], "rb"), *out;
+        char cut[1100], buf[1 << 16];
+        size_t got = in ? fread(buf, 1, sizeof buf, in) : 0;
+        if (in)
+            fclose(in);
+        snprintf(cut, sizeof cut, "%s.cut", argv[1]);
+        out = fopen(cut, "wb");
+        expect(got > 100 && out != NULL, "the index file to cut");
+        if (out) {
+            fwrite(buf, 1, got / 2, out);
+            fclose(out);
+        }
+        of_index_init(&ix4);
+        for (i = 2; i < (size_t)argc; ++i)
+            of_index_add_dir(&ix4, argv[i]);
+        expect(of_index_load(&ix4, cut) == OF_ERR_CACHE && ix4.count == 0, "a cut index is refused");
+        expect(of_index_stale(&ix4), "and the folders are read again");
+        of_index_free(&ix4);
+        remove(cut);
+    }
+
+    /* one fallback for two faces at two sizes: each gets it at its own size */
+    {
+        OFFace *a16 = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 0, NULL);
+        OFFace *b32 = of_index_open(&ix, ctx, "Liberation Serif", 400, 0, 0, NULL);
+        OFFace *shared = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);
+        OFFaceInfo fi;
+        expect(a16 && b32 && shared, "three faces to share a fallback");
+        if (a16 && b32 && shared) {
+            of_face_set_pixel_size(a16, 16);
+            of_face_set_pixel_size(b32, 32);
+            of_face_add_fallback(a16, shared);
+            of_face_add_fallback(b32, shared);
+            of_shape_utf8(a16, text, strlen(text), glyphs, 64);
+            of_shape_utf8(b32, text, strlen(text), glyphs, 64);
+            of_face_info(of_face_fallback(a16, 1), &fi);
+            expect(fi.pixel_size == 16, "the shared fallback at the first face's size");
+            of_face_info(of_face_fallback(b32, 1), &fi);
+            expect(fi.pixel_size == 32, "and at the second's");
+        }
+        of_face_close(a16);
+        of_face_close(b32);
+        of_face_close(shared);
+    }
+
+    /* why a face did not open */
+    {
+        int err = 0;
+        expect(!of_face_open_file(ctx, "/no/such/font.ttf", 0, &err) && err == OF_ERR_IO, "no file: I/O");
+        expect(!of_face_open_file(ctx, argv[1], 0, &err) && err == OF_ERR_FONT, "not a font: font");
     }
 
     of_index_free(&ix);

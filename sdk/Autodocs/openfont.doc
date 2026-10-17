@@ -30,8 +30,8 @@ openfont.library/--background--                 openfont.library/--background--
 	metrics, and each glyph's pixels. Programs call it in place of
 	FreeType, HarfBuzz and fontconfig, which run inside it.
 
-	It is built for the 68040 with its FPU, and refuses to open on
-	anything exec does not report as one.
+	It is built for the 68040 with its FPU, and refuses to open unless
+	exec reports both (AFF_68040 and AFF_FPU40): not on an LC040.
 
    VERSION 1 IS A PREVIEW
 	Its calls and structures may still change. They are frozen from
@@ -73,8 +73,9 @@ openfont.library/--background--                 openfont.library/--background--
 
    FILES AND TASKS
 	Calls that read files (opening a face or a cache, finding a face,
-	rescanning) must come from a process. From a plain task they fail
-	with OFERR_NOTPROCESS. The other calls may come from any task.
+	adding a font folder, rescanning) must come from a process. From a
+	plain task they fail with OFERR_NOTPROCESS. The other calls may come
+	from any task.
 
    STACK
 	Every call does its work on the library's own stack, so callers need
@@ -124,10 +125,13 @@ openfont.library/OF_AddFontDir                   openfont.library/OF_AddFontDir
 	expunged. It is indexed the next time a face is found. To add a
 	folder for every program, list it in ENVARC:OpenFont/FontDirs.
 
+	Must be called from a process: the first call that needs the index
+	reads its settings from ENVARC:OpenFont.
+
    RESULT
-	error - OFERR_OK (also when dir is listed already), or OFERR_RANGE
+	error - OFERR_OK (also when dir is listed already); OFERR_RANGE
 	        when the library knows sixteen folders, its own and
-	        FontDirs' included.
+	        FontDirs' included; OFERR_NOTPROCESS.
 
 openfont.library/OF_CacheGetGlyph             openfont.library/OF_CacheGetGlyph
 
@@ -253,10 +257,11 @@ openfont.library/OF_FindFaceA                     openfont.library/OF_FindFaceA
 	         means sans-serif.
 	tags - OFA_Weight (ULONG, 400), OFA_Italic (BOOL, FALSE),
 	       OFA_Size (ULONG, 16), OFA_Fallbacks (BOOL, TRUE),
-	       OFA_Error (LONG *).
+	       OFA_Error (LONG *): OFERR_FONT when no font is installed,
+	       or why the face chosen did not open (as OF_OpenFaceA).
 
    RESULT
-	face - or NULL when no font is installed.
+	face - or NULL.
 
 openfont.library/OF_FreeBitmap                   openfont.library/OF_FreeBitmap
 
@@ -303,8 +308,11 @@ openfont.library/OF_GetFallback                 openfont.library/OF_GetFallback
 
    FUNCTION
 	n 0 is face itself; 1 to the chain's length, its fallbacks in
-	order. Use it with OFGlyph.gl_Face to draw a shaped glyph. The face
-	returned is not held for the caller: do not close it.
+	order. Use it with OFGlyph.gl_Face to draw a shaped glyph. A
+	fallback is set to face's pixel size as it is returned (one face may
+	be a fallback of several), so call this for each glyph you draw
+	rather than keeping the result. The face returned is not held for
+	the caller: do not close it.
 
    RESULT
 	f - or NULL past the end of the chain.
@@ -362,7 +370,9 @@ openfont.library/OF_OpenFaceA                     openfont.library/OF_OpenFaceA
 	path - the font file.
 	tags - OFA_Index (ULONG, 0): the face of a collection;
 	       OFA_Size (ULONG, 16): the pixel size to start at;
-	       OFA_Error (LONG *): why it failed.
+	       OFA_Error (LONG *): why it failed: OFERR_IO (the file),
+	       OFERR_MEMORY, OFERR_FONT (not a font it reads),
+	       OFERR_NOTPROCESS.
 
    RESULT
 	face - or NULL.

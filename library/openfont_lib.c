@@ -244,13 +244,14 @@ static long w_open_face(void *base, void *arg)
     ULONG index = GetTagData(OFA_Index, 0, (struct TagItem *)a->tags);
     ULONG size = GetTagData(OFA_Size, 16, (struct TagItem *)a->tags);
     OFFace *face;
+    int err;
     if (!ctx) {
         set_error(a->tags, OF_ERR_MEMORY);
         return 0;
     }
-    face = of_face_open_index(ctx, a->path, index);
+    face = of_face_open_file(ctx, a->path, index, &err);
     if (!face) {
-        set_error(a->tags, OF_ERR_FONT);
+        set_error(a->tags, err);     /* the file, memory, or not a font */
         return 0;
     }
     if (size && of_face_set_pixel_size(face, size) != OF_OK) {
@@ -276,9 +277,9 @@ static long w_find_face(void *base, void *arg)
         set_error(a->tags, rc);
         return 0;
     }
-    face = of_index_open(&b->index, b->ctx, a->path, (uint16_t)weight, italic != 0, fallbacks != 0);
+    face = of_index_open(&b->index, b->ctx, a->path, (uint16_t)weight, italic != 0, fallbacks != 0, &rc);
     if (!face) {
-        set_error(a->tags, OF_ERR_FONT);
+        set_error(a->tags, rc);      /* no fonts (OF_ERR_FONT), or what opening gave */
         return 0;
     }
     if (size && of_face_set_pixel_size(face, size) != OF_OK) {
@@ -546,6 +547,9 @@ static LONG L_AddFontDir(REG(a0, CONST_STRPTR dir), BASE)
     struct OpenArgs a;
     if (!dir)
         return OF_ERR_ARGUMENT;
+    /* the first call to need the index reads its settings from ENVARC: */
+    if (!is_process())
+        return OFERR_NOTPROCESS;
     a.path = (const char *)dir;
     return run(b, w_add_dir, &a);
 }
@@ -717,9 +721,10 @@ static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR se
     b->lib.lib_Revision = LIB_REVISION;
     b->lib.lib_IdString = (APTR)lib_id;
     InitSemaphore(&b->lock);
-    /* built for the 68040 only, with its FPU: exec reports a 68040 (and a
-     * 68060 with its 68060.library, which runs 68040 code) */
-    if (!(sys->AttnFlags & AFF_68040))
+    /* built for the 68040 only, with its FPU (-m68881): exec reports a 68040
+     * and its working FPU (a 68060 with 68060.library reports both too). An
+     * LC040 has no FPU, and the library's floating point would trap there. */
+    if ((sys->AttnFlags & (AFF_68040 | AFF_FPU40)) != (AFF_68040 | AFF_FPU40))
         goto fail;
     DOSBase = (struct DosLibrary *)OpenLibrary((CONST_STRPTR)"dos.library", 39);
     UtilityBase = (struct UtilityBase *)OpenLibrary((CONST_STRPTR)"utility.library", 39);

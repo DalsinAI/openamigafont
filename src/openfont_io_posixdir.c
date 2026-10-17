@@ -3,6 +3,7 @@
 #include "openfont_io.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -19,7 +20,13 @@ int of_io_list_dir(const char *dir, OFDirFn fn, void *arg)
     d = opendir(dir);
     if (!d)
         return OF_ERR_IO;
-    while ((e = readdir(d)) != NULL) {
+    for (;;) {
+        errno = 0;
+        if ((e = readdir(d)) == NULL) {
+            if (errno)
+                rc = OF_ERR_IO;     /* a fault part way, not the end */
+            break;
+        }
         if (e->d_name[0] == '.')
             continue;
         if (of_io_join(path, sizeof path, dir, e->d_name) != OF_OK)

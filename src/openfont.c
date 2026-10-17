@@ -64,19 +64,22 @@ void of_context_destroy(OFContext *ctx)
     free(ctx);
 }
 
-OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
-                            uint32_t face_index, int take)
+static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
+                           uint32_t face_index, int take, int *error)
 {
     OFFace *face;
+    FT_Error fe;
     if (!ctx || !data || !size) {
         if (take)
             free(data);
+        *error = OF_ERR_ARGUMENT;
         return NULL;
     }
     face = (OFFace *)calloc(1, sizeof(*face));
     if (!face) {
         if (take)
             free(data);
+        *error = OF_ERR_MEMORY;
         return NULL;
     }
     face->ctx = ctx;
@@ -85,10 +88,12 @@ OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
     face->data_size = size;
     face->face_index = face_index;
     face->owns_data = take;
-    if (FT_New_Memory_Face(ctx->ft, data, (FT_Long)size, (FT_Long)face_index, &face->ft_face)) {
+    fe = FT_New_Memory_Face(ctx->ft, data, (FT_Long)size, (FT_Long)face_index, &face->ft_face);
+    if (fe) {
         if (take)
             free(data);
         free(face);
+        *error = fe == FT_Err_Out_Of_Memory ? OF_ERR_MEMORY : OF_ERR_FONT;
         return NULL;
     }
     face->hb_font = hb_ft_font_create_referenced(face->ft_face);
@@ -97,24 +102,41 @@ OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
         if (take)
             free(data);
         free(face);
+        *error = OF_ERR_MEMORY;
         return NULL;
     }
-    if (of_face_set_pixel_size(face, 16) != OF_OK) {
+    if ((*error = of_face_set_pixel_size(face, 16)) != OF_OK) {
         of_face_close(face);
         return NULL;
     }
     return face;
 }
 
-OFFace *of_face_open_index(OFContext *ctx, const char *path, uint32_t face_index)
+OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
+                            uint32_t face_index, int take)
+{
+    int error;
+    return open_memory(ctx, data, size, face_index, take, &error);
+}
+
+OFFace *of_face_open_file(OFContext *ctx, const char *path, uint32_t face_index, int *error)
 {
     uint8_t *data = NULL;
     size_t size = 0;
+    int e;
+    OFFace *face = NULL;
     if (!ctx || !path)
-        return NULL;
-    if (of_io_read_all(path, &data, &size) != OF_OK)
-        return NULL;
-    return of_face_open_memory(ctx, data, size, face_index, 1);
+        e = OF_ERR_ARGUMENT;
+    else if ((e = of_io_read_all(path, &data, &size)) == OF_OK)
+        face = open_memory(ctx, data, size, face_index, 1, &e);
+    if (error)
+        *error = e;
+    return face;
+}
+
+OFFace *of_face_open_index(OFContext *ctx, const char *path, uint32_t face_index)
+{
+    return of_face_open_file(ctx, path, face_index, NULL);
 }
 
 OFFace *of_face_open(OFContext *ctx, const char *path)
@@ -257,7 +279,12 @@ OFFace *of_face_fallback(OFFace *face, uint32_t n)
         return NULL;
     if (n == 0)
         return face;
-    return n <= face->nfallbacks ? face->fallbacks[n - 1] : NULL;
+    if (n > face->nfallbacks)
+        return NULL;
+    /* shaping sets a fallback to the size of the face it serves; another
+     * face it serves may have shaped since */
+    of_face_set_pixel_size(face->fallbacks[n - 1], face->pixel_size);
+    return face->fallbacks[n - 1];
 }
 
 /* ---- reading a face's tables through a stream (the index) ---- */
@@ -305,10 +332,10 @@ int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceI
     args.flags = FT_OPEN_STREAM;
     args.stream = stream;
     memset(&face, 0, sizeof face);
-    if (FT_Open_Face(ctx->ft, &args, (FT_Long)face_index, &face.ft_face)) {
+    if ((rc = FT_Open_Face(ctx->ft, &args, (FT_Long)face_index, &face.ft_face)) != 0) {
         /* FT_Open_Face closes a stream it was given, even on failure */
         free(stream);
-        return OF_ERR_FONT;
+        return rc == FT_Err_Out_Of_Memory ? OF_ERR_MEMORY : OF_ERR_FONT;
     }
     rc = of_face_info(&face, info);
     FT_Done_Face(face.ft_face);

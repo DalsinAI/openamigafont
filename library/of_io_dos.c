@@ -168,7 +168,13 @@ int of_io_list_dir(const char *dir, OFDirFn fn, void *arg)
         return OF_ERR_MEMORY;
     }
     if (Examine(lock, fib) && fib->fib_DirEntryType > 0) {
-        while (ExNext(lock, fib)) {
+        for (;;) {
+            if (!ExNext(lock, fib)) {
+                /* the end, or a fault part way: only the end is a full list */
+                if (IoErr() != ERROR_NO_MORE_ENTRIES)
+                    rc = OF_ERR_IO;
+                break;
+            }
             if (fib->fib_DirEntryType >= 0)
                 continue;       /* a folder, or a link to one */
             if (of_io_join(path, sizeof path, dir, (const char *)fib->fib_FileName) != OF_OK)

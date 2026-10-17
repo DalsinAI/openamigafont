@@ -72,8 +72,10 @@ const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
 void of_index_configure(OFIndex *ix, const char *aliases, const char *fallbacks);
 
 /* Opens the best face for family and adds the default fallback chain to
- * it, skipping the face itself and families not installed. */
+ * it, skipping the face itself and families not installed. When it fails,
+ * *error (if error is not NULL) says why: OF_ERR_FONT with no fonts
+ * indexed, or what opening the face gave. */
 OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
-                      uint16_t weight, int italic, int with_fallbacks);
+                      uint16_t weight, int italic, int with_fallbacks, int *error);
 
 #endif

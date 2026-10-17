@@ -115,6 +115,10 @@ void of_context_destroy(OFContext *ctx);
 OFFace *of_face_open(OFContext *ctx, const char *path);
 /* The face_index-th face of a file (a .ttc or .otc holds several). */
 OFFace *of_face_open_index(OFContext *ctx, const char *path, uint32_t face_index);
+/* The same, with why it failed in *error when error is not NULL:
+ * OF_ERR_IO (the file), OF_ERR_MEMORY, OF_ERR_FONT (not a font FreeType
+ * reads), OF_ERR_ARGUMENT. */
+OFFace *of_face_open_file(OFContext *ctx, const char *path, uint32_t face_index, int *error);
 /* A face from a font in memory. With take set, the face frees data with
  * free() when it is closed; otherwise data must outlive the face. */
 OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
@@ -128,10 +132,13 @@ int of_face_info(OFFace *face, OFFaceInfo *info);
 uint32_t of_face_char_index(OFFace *face, uint32_t codepoint);
 
 /* Adds fallback to the end of face's chain, holding it. OF_ERR_RANGE when
- * the chain is full, OF_ERR_ARGUMENT for a face falling back to itself. */
+ * the chain is full, OF_ERR_ARGUMENT for a face falling back to itself or
+ * to a face whose fallbacks lead back to it, however far. */
 int of_face_add_fallback(OFFace *face, OFFace *fallback);
 uint32_t of_face_fallback_count(const OFFace *face);
-/* 0: face itself; 1..count: its fallbacks. NULL past the end. Not held. */
+/* 0: face itself; 1..count: its fallbacks, set to face's pixel size (a
+ * fallback may serve several faces), so its glyphs draw as they shaped.
+ * NULL past the end. Not held. */
 OFFace *of_face_fallback(OFFace *face, uint32_t n);
 
 /* Shapes text (OpenType: ligatures, kerning, marks, the script's own

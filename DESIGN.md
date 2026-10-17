@@ -62,7 +62,8 @@ Modern applications call OpenFont directly when they need shaped measurement. Cl
 ## 6. The resident library
 
 `openfont.library` is built for AmigaOS 3.2 on the 68040 with its FPU, with
-OpenAmigaGCC 16.2.0-open2, and does not open on another CPU. Version 1 is a
+OpenAmigaGCC 16.2.0-open2 (`-m68040 -m68881`), and does not open unless exec
+reports both the CPU and its FPU: not on another CPU, nor on an LC040. Version 1 is a
 preview: its calls and structures may change. Version 2 freezes them, once the
 tests in §7 pass on a lab and on real 68040 hardware.
 
@@ -82,7 +83,8 @@ outlives it. The library has no C startup, no stdio and no constructors: libnix
 gives it only stateless functions.
 
 **Files only for processes.** The calls that read files (opening a face or a
-cache, finding a face, rescanning) use dos.library, so they need a process. A
+cache, finding a face, adding a font folder, rescanning) use dos.library, so
+they need a process. A
 plain task gets `OFERR_NOTPROCESS`. Shaping, metrics and rasterising use only
 memory, and any task may call them. A face's font file is read whole into
 memory when it opens.
@@ -90,9 +92,13 @@ memory when it opens.
 **The font index.** Finding a face by family needs every installed face's
 names, which means opening each font. The index does that once and keeps the
 answer in `ENVARC:OpenFont/FontIndex`, a text file of folders (with their
-dates) and faces (path, face index, family, style, weight, width, slant). When
-a folder's date differs from the index's (a font added or taken away), the
-folders are read again. Finding a face tries the family, then the user's
+dates) and faces (path, face index, family, style, weight, width, slant),
+ending with a count of the faces: a file cut short is not used. When a
+folder's date differs from the index's (a font added or taken away), the
+folders are read again. A folder that could not be listed whole, or a font in
+it that could not be opened just then (being copied in), leaves the index
+stale, so the next look reads the folders again; running out of memory leaves
+it all stale. Finding a face tries the family, then the user's
 aliases (`ENVARC:OpenFont/Aliases`), then OpenFont's own, then `sans-serif`.
 Among a family's faces the right slant counts most, then the nearest weight,
 and a wide or narrow face is marked down.
@@ -106,7 +112,9 @@ down the chain. What no face has is the first face's own shaping of it, its
 glyph 0 marked missing. Fallbacks may not form a loop, however long: each face
 holds its fallbacks open. Each glyph says which face of the chain it came from.
 A chain is one level deep: a fallback's own fallbacks are not used. A fallback
-shapes at the pixel size of the face it serves.
+shapes at the pixel size of the face it serves, and is set to it again when a
+program asks for it (`OF_GetFallback`) to draw its glyphs, since one face may
+serve several.
 
 **The cache's fingerprint.** A compiled cache names the font it was compiled
 from by a hash of its bytes. The hash is worked out the first time a face is

@@ -184,6 +184,7 @@ struct ScanArg {
     OFIndex *ix;
     OFContext *ctx;
     int rc;
+    int incomplete;             /* a file of this folder could not be read */
 };
 
 static int scan_file(const char *path, void *arg)
@@ -195,7 +196,18 @@ static int scan_file(const char *path, void *arg)
     while (face_index < num_faces && face_index < 64) {
         OFFaceInfo info;
         OFIndexEntry e;
-        if (of_probe_face(a->ctx, path, face_index, &info) != OF_OK)
+        int rc = of_probe_face(a->ctx, path, face_index, &info);
+        if (rc == OF_ERR_MEMORY) {
+            a->rc = rc;
+            return 1;
+        }
+        if (rc == OF_ERR_IO) {
+            /* in use (being copied in, say) or unreadable just now: the
+             * folder is read again next time */
+            a->incomplete = 1;
+            break;
+        }
+        if (rc != OF_OK)
             break;              /* not a font after all: skip it, keep going */
         num_faces = info.num_faces ? info.num_faces : 1;
         memset(&e, 0, sizeof e);
@@ -234,6 +246,7 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
             memset(d->stamp, 0, sizeof d->stamp);
             continue;
         }
+        a.incomplete = 0;
         rc = of_io_list_dir(d->path, scan_file, &a);
         if (a.rc != OF_OK) {
             /* stopped part way: nothing counts as up to date, so the next
@@ -245,10 +258,10 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
             }
             return a.rc;
         }
-        if (rc != OF_OK) {
-            /* there, but not listed (or not all of it): keep what the other
-             * folders gave, and mark this one so the next look reads it
-             * again rather than taking it as empty */
+        if (rc != OF_OK || a.incomplete) {
+            /* there, but not listed (or not all of it, or a font not read):
+             * keep what the folders gave, and mark this one so the next
+             * look reads it again rather than taking it as it is */
             d->present = 0;
             memset(d->stamp, 0, sizeof d->stamp);
         }
@@ -257,10 +270,13 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
 }
 
 /* ---- the file: a few lines of text ----
- *   OFIX 1
+ *   OFIX 2
  *   D <stamp0> <stamp1> <stamp2> <present>	<folder>
  *   F <face> <weight> <width> <flags> <range0..3>	<family>	<style>	<path>
- * Numbers in hex. Tabs never occur in names; a name with one is cut there. */
+ *   E <how many F lines>
+ * Numbers in hex. Tabs never occur in names; a name with one is cut there.
+ * A file without its E line, or with the wrong count, was cut short and is
+ * refused (version 1 had no E line). */
 
 struct Out {
     uint8_t *p;
@@ -317,7 +333,7 @@ int of_index_save(const OFIndex *ix, const char *path)
     if (!ix || !path)
         return OF_ERR_ARGUMENT;
     memset(&o, 0, sizeof o);
-    put(&o, "OFIX 1\n", 7);
+    put(&o, "OFIX 2\n", 7);
     for (i = 0; i < ix->ndirs; ++i) {
         put(&o, "D ", 2);
         for (k = 0; k < 3; ++k)
@@ -344,6 +360,10 @@ int of_index_save(const OFIndex *ix, const char *path)
         puts_(&o, e->path);
         put(&o, "\n", 1);
     }
+    /* the last line, with the count of F lines: a file cut short is refused */
+    put(&o, "E ", 2);
+    puthex(&o, (uint32_t)ix->count);
+    put(&o, "\n", 1);
     if (o.failed) {
         free(o.p);
         return OF_ERR_MEMORY;
@@ -400,7 +420,8 @@ int of_index_load(OFIndex *ix, const char *path)
     const char *p, *end;
     OFIndexDir dirs[OF_INDEX_MAX_DIRS];
     size_t ndirs = 0, i;
-    int rc;
+    uint32_t flines = 0;
+    int rc, ended = 0;
 
     if (!ix || !path)
         return OF_ERR_ARGUMENT;
@@ -409,7 +430,7 @@ int of_index_load(OFIndex *ix, const char *path)
         return rc;
     p = (const char *)data;
     end = p + size;
-    if (size < 7 || memcmp(p, "OFIX 1\n", 7)) {
+    if (size < 7 || memcmp(p, "OFIX 2\n", 7)) {
         free(data);
         return OF_ERR_CACHE;
     }
@@ -422,6 +443,13 @@ int of_index_load(OFIndex *ix, const char *path)
         p = eol < end ? eol + 1 : eol;
         if (eol - line < 2 || line[1] != ' ')
             continue;
+        if (line[0] == 'E') {
+            uint32_t v;
+            ended = gethex(line + 2, eol, &v, 1) != NULL && v == flines;
+            break;
+        }
+        if (line[0] == 'F')
+            flines++;
         if (line[0] == 'D' && ndirs < OF_INDEX_MAX_DIRS) {
             uint32_t v[4];
             const char *q = gethex(line + 2, eol, v, 4);
@@ -456,6 +484,11 @@ int of_index_load(OFIndex *ix, const char *path)
         }
     }
     free(data);
+    if (!ended) {
+        /* cut short, or not ours: none of it counts */
+        ix->count = 0;
+        return OF_ERR_CACHE;
+    }
     /* the folders the caller asked for are the list: take each one's stamp
      * from the file when it was indexed, and drop entries of others */
     for (i = 0; i < ix->ndirs; ++i) {
@@ -598,14 +631,24 @@ const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
 }
 
 OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
-                      uint16_t weight, int italic, int with_fallbacks)
+                      uint16_t weight, int italic, int with_fallbacks, int *error)
 {
     const OFIndexEntry *e = of_index_find(ix, family, weight, italic);
     OFFace *face;
     const char *p, *end;
-    if (!e || !ctx)
+    int dummy;
+    if (!error)
+        error = &dummy;
+    *error = OF_OK;
+    if (!ctx) {
+        *error = OF_ERR_ARGUMENT;
         return NULL;
-    face = of_face_open_index(ctx, e->path, e->face_index);
+    }
+    if (!e) {
+        *error = OF_ERR_FONT;
+        return NULL;
+    }
+    face = of_face_open_file(ctx, e->path, e->face_index, error);
     if (!face || !with_fallbacks)
         return face;
     p = ix->fallbacks;

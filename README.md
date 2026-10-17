@@ -134,7 +134,8 @@ and a count below the break-even still match the CPU loop.
 ## openfont.library
 
 The resident library is for AmigaOS 3.2 on a 68040 with its FPU, and only
-that: it does not open on another CPU. Later, AC090 leaves may take shaping,
+that: it does not open on another CPU, or on a 68040 without its FPU (an
+LC040). Later, AC090 leaves may take shaping,
 glyph rasterisation and atlas building, with the same results.
 
 It holds the core, the index, FreeType (TrueType and CFF outlines, their
