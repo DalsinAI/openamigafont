@@ -6,24 +6,21 @@
 #include <string.h>
 
 #include "of_font.h"
+#include "of_layout.h"
+#include "of_unicode.h"
 
-#include <hb.h>
-#include <hb-ot.h>
-
-/* The fonts are read and drawn by OpenFont's own reader and rasteriser
- * (of_font.c, of_cff.c, of_raster.c). HarfBuzz still shapes, over the same
- * font data, with its glyphs' advances taken from OpenFont so the shaping
- * and the bitmaps agree. */
+/* The fonts are read, shaped and drawn by OpenFont's own code: the reader
+ * and rasteriser (of_font.c, of_cff.c, of_raster.c) and the shaper
+ * (of_shape.c, of_layout.c). */
 
 struct OFContext {
-    hb_font_funcs_t *advances;      /* HarfBuzz's way to OpenFont's advances */
+    int unused;                     /* nothing shared yet; kept for the API */
 };
 
 struct OFFace {
     OFContext *ctx;
     OFFont font;
     OFPath path;                    /* reused by every raster of this face */
-    hb_font_t *hb_font;
     uint32_t pixel_size;
     uint32_t refs;
     uint8_t *data;                  /* the font file, owned when take was set */
@@ -49,30 +46,11 @@ static uint64_t fingerprint_bytes(const uint8_t *p, size_t n)
     return h;
 }
 
-/* HarfBuzz asks OpenFont for advances: the same, to the 64th of a pixel,
- * as the bitmaps', at the face's size */
-static hb_position_t hb_advance(hb_font_t *font, void *font_data, hb_codepoint_t glyph, void *user)
-{
-    OFFace *face = (OFFace *)font_data;
-    (void)font;
-    (void)user;
-    if (glyph >= face->font.num_glyphs)
-        return 0;
-    return of_font_advance_px(&face->font, glyph, face->pixel_size);
-}
-
 OFContext *of_context_create(void)
 {
     OFContext *ctx = (OFContext *)calloc(1, sizeof(*ctx));
     if (!ctx)
         return NULL;
-    ctx->advances = hb_font_funcs_create();
-    if (ctx->advances == hb_font_funcs_get_empty()) {
-        free(ctx);
-        return NULL;
-    }
-    hb_font_funcs_set_glyph_h_advance_func(ctx->advances, hb_advance, NULL, NULL);
-    hb_font_funcs_make_immutable(ctx->advances);
     return ctx;
 }
 
@@ -80,7 +58,6 @@ void of_context_destroy(OFContext *ctx)
 {
     if (!ctx)
         return;
-    hb_font_funcs_destroy(ctx->advances);   /* faces still open hold their own */
     free(ctx);
 }
 
@@ -88,9 +65,6 @@ static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
                            uint32_t face_index, int take, int *error)
 {
     OFFace *face;
-    hb_blob_t *blob;
-    hb_face_t *hb_face;
-    hb_font_t *parent;
     int rc;
     if (!ctx || !data || !size) {
         if (take)
@@ -121,22 +95,6 @@ static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
         *error = rc;
         return NULL;
     }
-    blob = hb_blob_create((const char *)data, (unsigned)size, HB_MEMORY_MODE_READONLY, NULL, NULL);
-    hb_face = hb_face_create(blob, face_index);
-    hb_blob_destroy(blob);
-    parent = hb_font_create(hb_face);
-    hb_face_destroy(hb_face);
-    face->hb_font = hb_font_create_sub_font(parent);
-    hb_font_destroy(parent);
-    if (face->hb_font == hb_font_get_empty()) {
-        of_font_close(&face->font);
-        if (take)
-            free(data);
-        free(face);
-        *error = OF_ERR_MEMORY;
-        return NULL;
-    }
-    hb_font_set_funcs(face->hb_font, ctx->advances, face, NULL);
     if ((*error = of_face_set_pixel_size(face, 16)) != OF_OK) {
         of_face_close(face);
         return NULL;
@@ -185,7 +143,6 @@ void of_face_close(OFFace *face)
         return;
     for (i = 0; i < face->nfallbacks; ++i)
         of_face_close(face->fallbacks[i]);
-    hb_font_destroy(face->hb_font);
     of_font_close(&face->font);
     of_path_free(&face->path);
     if (face->owns_data)
@@ -201,10 +158,7 @@ int of_face_set_pixel_size(OFFace *face, uint32_t pixels)
         return OF_OK;
     if (pixels > 16384)
         return OF_ERR_FONT;
-    /* positions in 26.6, unhinted, as the bitmaps */
-    hb_font_set_scale(face->hb_font, (int)pixels * 64, (int)pixels * 64);
-    hb_font_set_ppem(face->hb_font, pixels, pixels);
-    face->pixel_size = pixels;
+    face->pixel_size = pixels;   /* positions in 26.6, unhinted, as the bitmaps */
     return OF_OK;
 }
 
@@ -504,51 +458,36 @@ static void vec_push(GlyphVec *v, const OFGlyph *g)
 }
 
 /* Shapes text[off, off + len) with face, the whole text as its context, and
- * appends the glyphs, each marked as from face_no. The run's script and
- * direction are guessed the first time (props->direction invalid) and kept
- * in props; the fallbacks' items reuse them, since a piece of a run (an
- * emoji, a mark in Arabic) can't tell its own. */
+ * appends the glyphs, each marked as from face_no. The run's script is
+ * worked out the first time (*script OF_SCRIPT_UNKNOWN) and kept; the
+ * fallbacks' pieces reuse it, since a piece of a run (an emoji, a mark)
+ * can't tell its own. */
 static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t bytes,
-                      size_t off, size_t len, hb_segment_properties_t *props, GlyphVec *out)
+                      size_t off, size_t len, unsigned *script, GlyphVec *out)
 {
-    hb_buffer_t *buffer;
-    hb_glyph_info_t *info;
-    hb_glyph_position_t *pos;
-    unsigned count = 0, i;
+    OFShBuf b;
+    uint32_t i;
+    int rc;
 
-    buffer = hb_buffer_create();
-    if (!hb_buffer_allocation_successful(buffer)) {
-        hb_buffer_destroy(buffer);
-        return OF_ERR_MEMORY;
+    memset(&b, 0, sizeof b);
+    rc = of_shape_text(&face->font, face->pixel_size, utf8, bytes, off, len, script, &b);
+    if (rc != OF_OK) {
+        free(b.g);
+        return rc;
     }
-    hb_buffer_add_utf8(buffer, utf8, (int)bytes, (unsigned)off, (int)len);
-    if (props->direction == HB_DIRECTION_INVALID) {
-        hb_buffer_guess_segment_properties(buffer);
-        hb_buffer_get_segment_properties(buffer, props);
-    } else {
-        hb_buffer_set_segment_properties(buffer, props);
-    }
-    hb_shape(face->hb_font, buffer, NULL, 0);
-    if (!hb_buffer_allocation_successful(buffer)) {
-        hb_buffer_destroy(buffer);
-        return OF_ERR_MEMORY;
-    }
-    info = hb_buffer_get_glyph_infos(buffer, &count);
-    pos = hb_buffer_get_glyph_positions(buffer, &count);
-    for (i = 0; i < count; ++i) {
+    for (i = 0; i < b.n; ++i) {
         OFGlyph g;
-        g.glyph_id = info[i].codepoint;
-        g.cluster = info[i].cluster;
-        g.x_advance_26_6 = pos[i].x_advance;
-        g.y_advance_26_6 = pos[i].y_advance;
-        g.x_offset_26_6 = pos[i].x_offset;
-        g.y_offset_26_6 = pos[i].y_offset;
+        g.glyph_id = b.g[i].gid;
+        g.cluster = b.g[i].cluster;
+        g.x_advance_26_6 = b.g[i].xa;
+        g.y_advance_26_6 = b.g[i].ya;
+        g.x_offset_26_6 = b.g[i].xo;
+        g.y_offset_26_6 = b.g[i].yo;
         g.face = face_no;
-        g.flags = (hb_glyph_info_get_glyph_flags(&info[i]) & HB_GLYPH_FLAG_UNSAFE_TO_BREAK)
-                  ? OF_GLYPH_UNSAFE_TO_BREAK : 0;
+        g.flags = (b.g[i].props & OF_SH_UNSAFE) ? OF_GLYPH_UNSAFE_TO_BREAK : 0;
         vec_push(out, &g);
     }
-    hb_buffer_destroy(buffer);
+    free(b.g);
     return out->failed ? OF_ERR_MEMORY : OF_OK;
 }
 
@@ -569,7 +508,7 @@ static void push_marked(GlyphVec *out, const OFGlyph *g, size_t n)
  * what the last face can't show is the first face's own shaping of it (its
  * glyph 0, marked missing). */
 static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t bytes,
-                       size_t off, size_t len, hb_segment_properties_t *props, GlyphVec *out)
+                       size_t off, size_t len, unsigned *script, GlyphVec *out)
 {
     OFFace *face = level ? root->fallbacks[level - 1] : root;
     GlyphVec tmp;
@@ -580,7 +519,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
     memset(&tmp, 0, sizeof tmp);
     if (level && of_face_set_pixel_size(face, root->pixel_size) != OF_OK)
         return OF_ERR_FONT;
-    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, props, &tmp);
+    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, script, &tmp);
     if (rc != OF_OK) {
         free(tmp.g);
         return rc;
@@ -628,7 +567,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
             if (tmp.g[k].cluster > cmax && tmp.g[k].cluster < end)
                 end = tmp.g[k].cluster;
         if (level < root->nfallbacks) {
-            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, props, out);
+            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, script, out);
             if (rc != OF_OK)
                 break;
         } else if (level) {
@@ -636,7 +575,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
              * so its glyph numbers, advances and pixels agree */
             GlyphVec first;
             memset(&first, 0, sizeof first);
-            rc = shape_item(root, 0, utf8, bytes, cmin, end - cmin, props, &first);
+            rc = shape_item(root, 0, utf8, bytes, cmin, end - cmin, script, &first);
             if (rc == OF_OK)
                 push_marked(out, first.g, first.n);
             free(first.g);
@@ -658,12 +597,12 @@ size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
                      OFGlyph *out, size_t capacity)
 {
     GlyphVec v;
-    hb_segment_properties_t props = HB_SEGMENT_PROPERTIES_DEFAULT;
+    unsigned script = OF_SCRIPT_UNKNOWN;
     size_t n;
     if (!face || !utf8 || !bytes)
         return 0;
     memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &props, &v) != OF_OK) {
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &script, &v) != OF_OK) {
         free(v.g);
         return 0;
     }
@@ -677,13 +616,13 @@ size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes)
 {
     GlyphVec v;
-    hb_segment_properties_t props = HB_SEGMENT_PROPERTIES_DEFAULT;
+    unsigned script = OF_SCRIPT_UNKNOWN;
     size_t i;
     int64_t total = 0;
     if (!face || !utf8 || !bytes)
         return 0;
     memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &props, &v) != OF_OK) {
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &script, &v) != OF_OK) {
         free(v.g);
         return 0;
     }

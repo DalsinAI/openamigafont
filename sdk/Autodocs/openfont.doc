@@ -28,8 +28,8 @@ openfont.library/--background--                 openfont.library/--background--
 	openfont.library is the Open stack's font service for AmigaOS 3.2 on
 	the 68040: finding a font, shaping text with OpenType's rules, its
 	metrics, and each glyph's pixels. Programs call it in place of
-	FreeType, HarfBuzz and fontconfig. It reads and draws fonts with its
-	own code; HarfBuzz shapes inside it for now.
+	FreeType, HarfBuzz and fontconfig. It reads, shapes and draws fonts
+	with its own code.
 
 	It is built for the 68040 with its FPU, and refuses to open unless
 	exec reports both (AFF_68040 and AFF_FPU40): not on an LC040.

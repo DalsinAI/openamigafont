@@ -13,4 +13,4 @@ for d in "$STOVE/bin" "$STOVE/prefix/bin"; do
     if [ -x "$d/m68k-amigaos-gcc" ]; then BIN=$d; break; fi
 done
 [ -n "$BIN" ] || { echo "no m68k-amigaos-gcc in $STOVE" >&2; exit 1; }
-CC=$BIN/m68k-amigaos-gcc CXX=$BIN/m68k-amigaos-g++ sh "$HERE/amiga/build-library.sh" "$OUT"
+CC=$BIN/m68k-amigaos-gcc sh "$HERE/amiga/build-library.sh" "$OUT"
