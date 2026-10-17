@@ -193,7 +193,7 @@ static int scan_file(const char *path, void *arg)
     uint32_t face_index = 0, num_faces = 1;
     if (!font_file(path) || strlen(path) >= OF_INDEX_PATH)
         return 0;
-    while (face_index < num_faces && face_index < 64) {
+    while (face_index < num_faces) {
         OFFaceInfo info;
         OFIndexEntry e;
         int rc = of_probe_face(a->ctx, path, face_index, &info);

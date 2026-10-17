@@ -289,19 +289,31 @@ OFFace *of_face_fallback(OFFace *face, uint32_t n)
 
 /* ---- reading a face's tables through a stream (the index) ---- */
 
+typedef struct Probe {
+    OFFile *file;
+    int io_error;               /* a read inside the file came back short */
+} Probe;
+
 static unsigned long stream_read(FT_Stream stream, unsigned long offset,
                                  unsigned char *buffer, unsigned long count)
 {
-    OFFile *f = (OFFile *)stream->descriptor.pointer;
+    Probe *p = (Probe *)stream->descriptor.pointer;
+    uint32_t got;
     if (!count)
         return offset <= stream->size ? 0 : 1;  /* a seek: 0 is success */
-    return of_io_read_at(f, (uint32_t)offset, buffer, (uint32_t)count);
+    got = of_io_read_at(p->file, (uint32_t)offset, buffer, (uint32_t)count);
+    /* FreeType asks only within the size it was given, so short here is
+     * the disk (or the file cut while we read), not the font */
+    if (got < count && offset < stream->size && count <= stream->size - offset)
+        p->io_error = 1;
+    return got;
 }
 
 static void stream_close(FT_Stream stream)
 {
-    of_io_close((OFFile *)stream->descriptor.pointer);
-    stream->descriptor.pointer = NULL;
+    Probe *p = (Probe *)stream->descriptor.pointer;
+    of_io_close(p->file);
+    p->file = NULL;
 }
 
 int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceInfo *info)
@@ -309,23 +321,24 @@ int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceI
     FT_StreamRec *stream;
     FT_Open_Args args;
     OFFace face;
+    Probe probe;
     uint32_t size = 0;
-    OFFile *f;
     int rc;
 
     if (!ctx || !path || !info)
         return OF_ERR_ARGUMENT;
-    f = of_io_open(path, &size);
-    if (!f)
+    probe.io_error = 0;
+    probe.file = of_io_open(path, &size);
+    if (!probe.file)
         return OF_ERR_IO;
     /* FreeType keeps the stream until the face is done, and closes it */
     stream = (FT_StreamRec *)calloc(1, sizeof(*stream));
     if (!stream) {
-        of_io_close(f);
+        of_io_close(probe.file);
         return OF_ERR_MEMORY;
     }
     stream->size = size;
-    stream->descriptor.pointer = f;
+    stream->descriptor.pointer = &probe;
     stream->read = stream_read;
     stream->close = stream_close;
     memset(&args, 0, sizeof args);
@@ -335,11 +348,15 @@ int of_probe_face(OFContext *ctx, const char *path, uint32_t face_index, OFFaceI
     if ((rc = FT_Open_Face(ctx->ft, &args, (FT_Long)face_index, &face.ft_face)) != 0) {
         /* FT_Open_Face closes a stream it was given, even on failure */
         free(stream);
-        return rc == FT_Err_Out_Of_Memory ? OF_ERR_MEMORY : OF_ERR_FONT;
+        if (rc == FT_Err_Out_Of_Memory)
+            return OF_ERR_MEMORY;
+        return probe.io_error ? OF_ERR_IO : OF_ERR_FONT;
     }
     rc = of_face_info(&face, info);
     FT_Done_Face(face.ft_face);
     free(stream);
+    if (rc == OF_OK && probe.io_error)
+        rc = OF_ERR_IO;         /* its tables read short: don't trust them */
     return rc;
 }
 
