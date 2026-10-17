@@ -90,8 +90,7 @@ int start(void)
 }
 
 static const char lib_name[] = "openfont.library";
-static const char lib_id[] = "openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team\r\n";
-static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team";
+static const char lib_id[] = "openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team\r\n";static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team";
 
 #define REG(r, decl) register decl __asm(#r)
 #define BASE REG(a6, struct OpenFontBase *b)
@@ -519,8 +518,13 @@ static LONG L_RasterGlyph(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(a1, O
 static VOID L_FreeBitmap(REG(a0, OFBitmap *bitmap), BASE)
 {
     struct FaceArgs a;
-    if (!bitmap || !bitmap->pixels)
+    if (!bitmap)
         return;
+    if (!bitmap->pixels) {
+        /* an empty glyph: nothing to free, but clear it all the same */
+        memset(bitmap, 0, sizeof(*bitmap));
+        return;
+    }
     a.out = bitmap;
     run(b, w_free_bitmap, &a);
 }
@@ -704,7 +708,14 @@ static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR se
 {
     SysBase = sys;
     b->seglist = seglist;
+    /* MakeLibrary fills only the sizes (there is no InitStruct table): the
+     * node and the version are ours to set, before exec adds the library */
+    b->lib.lib_Node.ln_Type = NT_LIBRARY;
+    b->lib.lib_Node.ln_Name = (char *)lib_name;
+    b->lib.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
+    b->lib.lib_Version = LIB_VERSION;
     b->lib.lib_Revision = LIB_REVISION;
+    b->lib.lib_IdString = (APTR)lib_id;
     InitSemaphore(&b->lock);
     /* built for the 68040 only, with its FPU: exec reports a 68040 (and a
      * 68060 with its 68060.library, which runs 68040 code) */

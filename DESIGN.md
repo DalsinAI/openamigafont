@@ -100,9 +100,11 @@ and a wide or narrow face is marked down.
 **Fallback by cluster.** A face holds a chain of up to eight others. Shaping
 runs the face over the whole run. A cluster is missing when any of its glyphs
 is glyph 0; each stretch of missing clusters is shaped again with the next face
-of the chain, given the whole run as context so the script and joining are
-right, and so on down the chain. What no face has stays the first face's
-glyph 0, marked missing. Each glyph says which face of the chain it came from.
+of the chain, given the whole run as context and the script and direction
+guessed for the whole run (a lone emoji or mark can't tell its own), and so on
+down the chain. What no face has is the first face's own shaping of it, its
+glyph 0 marked missing. Fallbacks may not form a loop, however long: each face
+holds its fallbacks open. Each glyph says which face of the chain it came from.
 A chain is one level deep: a fallback's own fallbacks are not used. A fallback
 shapes at the pixel size of the face it serves.
 

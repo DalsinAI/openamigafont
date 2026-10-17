@@ -94,7 +94,57 @@ int main(int argc, char **argv)
                "the fallback face draws it");
         of_bitmap_release(&b);
     }
+    /* a codepoint no face of the chain has: the first face's own glyph 0,
+     * with its own advance, not the last fallback's */
+    {
+        static const char none[] = "\xF4\x8F\xBF\xBD";     /* U+10FFFD */
+        OFFace *alone = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 0);
+        OFGlyph a[4], c[4];
+        expect(alone && of_face_fallback_count(alone) == 0, "a face with no fallbacks");
+        if (alone) {
+            of_face_set_pixel_size(alone, 16);
+            expect(of_shape_utf8(alone, none, 4, a, 4) == 1 && of_shape_utf8(face, none, 4, c, 4) == 1,
+                   "one glyph for an unknown codepoint");
+            expect(c[0].glyph_id == 0 && c[0].face == 0 && (c[0].flags & OF_GLYPH_MISSING), "marked missing");
+            expect(c[0].x_advance_26_6 == a[0].x_advance_26_6, "the first face's own advance for it");
+            printf("  missing: adv=%d (the face alone %d)\n", c[0].x_advance_26_6, a[0].x_advance_26_6);
+            of_face_close(alone);
+        }
+    }
     of_face_close(face);
+
+    /* no loops in the fallback graph, however long */
+    {
+        OFFace *fa = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0);
+        OFFace *fb = of_index_open(&ix, ctx, "DejaVu Serif", 400, 0, 0);
+        OFFace *fc = of_index_open(&ix, ctx, "Liberation Mono", 400, 0, 0);
+        expect(fa && fb && fc, "three faces");
+        if (fa && fb && fc) {
+            expect(of_face_add_fallback(fa, fa) == OF_ERR_ARGUMENT, "not to itself");
+            expect(of_face_add_fallback(fa, fb) == OF_OK, "A to B");
+            expect(of_face_add_fallback(fb, fa) == OF_ERR_ARGUMENT, "not B back to A");
+            expect(of_face_add_fallback(fb, fc) == OF_OK, "B to C");
+            expect(of_face_add_fallback(fc, fa) == OF_ERR_ARGUMENT, "not C back to A");
+            expect(of_face_add_fallback(fa, fc) == OF_OK, "A to C as well");
+        }
+        of_face_close(fa);
+        of_face_close(fb);
+        of_face_close(fc);
+    }
+
+    /* a folder that is there but can't be listed stays stale */
+    {
+        OFIndex ix3;
+        char file[1024];
+        snprintf(file, sizeof file, "%s/DejaVuSans.ttf", argv[2]);
+        of_index_init(&ix3);
+        of_index_add_dir(&ix3, argv[2]);
+        of_index_add_dir(&ix3, file);
+        expect(of_index_scan(&ix3, ctx) == OF_OK && ix3.count > 0, "scan with a folder that isn't one");
+        expect(of_index_stale(&ix3), "it is read again next time");
+        of_index_free(&ix3);
+    }
+
     of_index_free(&ix);
     of_index_free(&ix2);
     of_context_destroy(ctx);

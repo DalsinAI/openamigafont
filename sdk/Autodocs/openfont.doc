@@ -102,7 +102,8 @@ openfont.library/OF_AddFallback                 openfont.library/OF_AddFallback
    RESULT
 	error - OFERR_OK; OFERR_RANGE when the chain holds OF_MAX_FALLBACKS
 	        already; OFERR_ARGUMENT for a face falling back to itself,
-	        or to a face that falls back to it.
+	        or to a face whose fallbacks (or theirs, however far) lead
+	        back to it: such a loop would keep its faces open.
 
    SEE ALSO
 	OF_GetFallback(), OF_ShapeText()

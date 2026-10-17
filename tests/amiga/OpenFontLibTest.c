@@ -49,6 +49,18 @@ static ULONG hash_bytes(ULONG h, const UBYTE *p, ULONG n)
     return h;
 }
 
+/* a number's bytes low first, as the host's test hashes them, so the two
+ * hashes agree across byte orders */
+static ULONG hash_u32(ULONG h, ULONG v)
+{
+    UBYTE b[4];
+    b[0] = (UBYTE)v;
+    b[1] = (UBYTE)(v >> 8);
+    b[2] = (UBYTE)(v >> 16);
+    b[3] = (UBYTE)(v >> 24);
+    return hash_bytes(h, b, 4);
+}
+
 /* a plain task, not a process: the library must refuse to read files */
 static volatile LONG task_result = 1, task_error = 0;
 static struct Task *parent;
@@ -108,8 +120,8 @@ int main(void)
         n = OF_ShapeText(face, (CONST_STRPTR)text, strlen(text), glyphs, 64);
         advance = OF_MeasureText(face, (CONST_STRPTR)text, strlen(text));
         for (i = 0; i < n && i < 64; ++i) {
-            hash = hash_bytes(hash, (const UBYTE *)&glyphs[i].gl_Glyph, 4);
-            hash = hash_bytes(hash, (const UBYTE *)&glyphs[i].gl_XAdvance, 4);
+            hash = hash_u32(hash, glyphs[i].gl_Glyph);
+            hash = hash_u32(hash, (ULONG)glyphs[i].gl_XAdvance);
         }
         check(advance == EXPECT_ADVANCE, "OF_MeasureText gives the host's advance");
         memset(&bm, 0, sizeof bm);

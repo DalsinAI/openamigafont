@@ -228,14 +228,30 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
     a.rc = OF_OK;
     for (i = 0; i < ix->ndirs; ++i) {
         OFIndexDir *d = &ix->dirs[i];
+        int rc;
         d->present = of_io_stamp(d->path, d->stamp) == OF_OK;
         if (!d->present) {
             memset(d->stamp, 0, sizeof d->stamp);
             continue;
         }
-        of_io_list_dir(d->path, scan_file, &a);
-        if (a.rc != OF_OK)
+        rc = of_io_list_dir(d->path, scan_file, &a);
+        if (a.rc != OF_OK) {
+            /* stopped part way: nothing counts as up to date, so the next
+             * look scans again */
+            size_t k;
+            for (k = 0; k < ix->ndirs; ++k) {
+                ix->dirs[k].present = 0;
+                memset(ix->dirs[k].stamp, 0, sizeof ix->dirs[k].stamp);
+            }
             return a.rc;
+        }
+        if (rc != OF_OK) {
+            /* there, but not listed (or not all of it): keep what the other
+             * folders gave, and mark this one so the next look reads it
+             * again rather than taking it as empty */
+            d->present = 0;
+            memset(d->stamp, 0, sizeof d->stamp);
+        }
     }
     return OF_OK;
 }

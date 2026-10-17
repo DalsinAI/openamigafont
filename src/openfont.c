@@ -29,6 +29,7 @@ struct OFFace {
     uint64_t source_fingerprint;
     uint32_t nfallbacks;
     OFFace *fallbacks[OF_MAX_FALLBACKS];
+    uint32_t walk;                  /* the last walk of the fallback graph to visit it */
 };
 
 /* FNV-1a is used only as a stale-cache fingerprint, not as a security hash. */
@@ -208,14 +209,36 @@ uint32_t of_face_char_index(OFFace *face, uint32_t codepoint)
     return face ? (uint32_t)FT_Get_Char_Index(face->ft_face, codepoint) : 0;
 }
 
-int of_face_add_fallback(OFFace *face, OFFace *fallback)
+/* One walk at a time: the faces are not shared between threads (the
+ * library takes its lock around every call). */
+static uint32_t walk_count;
+
+/* Whether from's fallbacks, or theirs, lead to to. The graph has no loops
+ * (of_face_add_fallback keeps it so), and each face is visited once. */
+static int leads_to(OFFace *from, const OFFace *to, uint32_t walk)
 {
     uint32_t i;
-    if (!face || !fallback || fallback == face)
+    if (from == to)
+        return 1;
+    if (from->walk == walk)
+        return 0;
+    from->walk = walk;
+    for (i = 0; i < from->nfallbacks; ++i)
+        if (leads_to(from->fallbacks[i], to, walk))
+            return 1;
+    return 0;
+}
+
+int of_face_add_fallback(OFFace *face, OFFace *fallback)
+{
+    if (!face || !fallback)
         return OF_ERR_ARGUMENT;
-    for (i = 0; i < fallback->nfallbacks; ++i)
-        if (fallback->fallbacks[i] == face)
-            return OF_ERR_ARGUMENT;     /* no loops: a chain is one level deep */
+    if (++walk_count == 0)
+        walk_count = 1;
+    /* No loops, however long: each face holds its fallbacks, so a loop
+     * would keep every face in it open after its owners close them. */
+    if (leads_to(fallback, face, walk_count))
+        return OF_ERR_ARGUMENT;
     if (face->nfallbacks >= OF_MAX_FALLBACKS)
         return OF_ERR_RANGE;
     fallback->refs++;
@@ -319,9 +342,12 @@ static void vec_push(GlyphVec *v, const OFGlyph *g)
 }
 
 /* Shapes text[off, off + len) with face, the whole text as its context, and
- * appends the glyphs, each marked as from face_no. */
+ * appends the glyphs, each marked as from face_no. The run's script and
+ * direction are guessed the first time (props->direction invalid) and kept
+ * in props; the fallbacks' items reuse them, since a piece of a run (an
+ * emoji, a mark in Arabic) can't tell its own. */
 static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t bytes,
-                      size_t off, size_t len, GlyphVec *out)
+                      size_t off, size_t len, hb_segment_properties_t *props, GlyphVec *out)
 {
     hb_buffer_t *buffer;
     hb_glyph_info_t *info;
@@ -334,7 +360,12 @@ static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t b
         return OF_ERR_MEMORY;
     }
     hb_buffer_add_utf8(buffer, utf8, (int)bytes, (unsigned)off, (int)len);
-    hb_buffer_guess_segment_properties(buffer);
+    if (props->direction == HB_DIRECTION_INVALID) {
+        hb_buffer_guess_segment_properties(buffer);
+        hb_buffer_get_segment_properties(buffer, props);
+    } else {
+        hb_buffer_set_segment_properties(buffer, props);
+    }
     hb_shape(face->hb_font, buffer, NULL, 0);
     if (!hb_buffer_allocation_successful(buffer)) {
         hb_buffer_destroy(buffer);
@@ -359,11 +390,24 @@ static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t b
     return out->failed ? OF_ERR_MEMORY : OF_OK;
 }
 
+/* Appends glyphs, glyph 0 marked missing. */
+static void push_marked(GlyphVec *out, const OFGlyph *g, size_t n)
+{
+    size_t k;
+    for (k = 0; k < n; ++k) {
+        OFGlyph x = g[k];
+        if (!x.glyph_id)
+            x.flags |= OF_GLYPH_MISSING;
+        vec_push(out, &x);
+    }
+}
+
 /* Shapes text[off, off + len) with the chain's level-th face. Every whole
  * cluster that face has no glyph for is shaped again with the next one;
- * what the last face can't show stays glyph 0 of the face shaped first. */
+ * what the last face can't show is the first face's own shaping of it (its
+ * glyph 0, marked missing). */
 static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t bytes,
-                       size_t off, size_t len, GlyphVec *out)
+                       size_t off, size_t len, hb_segment_properties_t *props, GlyphVec *out)
 {
     OFFace *face = level ? root->fallbacks[level - 1] : root;
     GlyphVec tmp;
@@ -374,7 +418,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
     memset(&tmp, 0, sizeof tmp);
     if (level && of_face_set_pixel_size(face, root->pixel_size) != OF_OK)
         return OF_ERR_FONT;
-    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, &tmp);
+    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, props, &tmp);
     if (rc != OF_OK) {
         free(tmp.g);
         return rc;
@@ -422,20 +466,22 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
             if (tmp.g[k].cluster > cmax && tmp.g[k].cluster < end)
                 end = tmp.g[k].cluster;
         if (level < root->nfallbacks) {
-            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, out);
+            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, props, out);
+            if (rc != OF_OK)
+                break;
+        } else if (level) {
+            /* none of the chain has it: the first face's own glyphs for it,
+             * so its glyph numbers, advances and pixels agree */
+            GlyphVec first;
+            memset(&first, 0, sizeof first);
+            rc = shape_item(root, 0, utf8, bytes, cmin, end - cmin, props, &first);
+            if (rc == OF_OK)
+                push_marked(out, first.g, first.n);
+            free(first.g);
             if (rc != OF_OK)
                 break;
         } else {
-            for (k = i; k < j; ++k) {
-                OFGlyph g = tmp.g[k];
-                if (level) {
-                    /* none of the chain has it: the first face's glyph 0 */
-                    g.face = 0;
-                }
-                if (!g.glyph_id)
-                    g.flags |= OF_GLYPH_MISSING;
-                vec_push(out, &g);
-            }
+            push_marked(out, tmp.g + i, j - i);
         }
         i = j;
     }
@@ -450,11 +496,12 @@ size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
                      OFGlyph *out, size_t capacity)
 {
     GlyphVec v;
+    hb_segment_properties_t props = HB_SEGMENT_PROPERTIES_DEFAULT;
     size_t n;
     if (!face || !utf8 || !bytes)
         return 0;
     memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &v) != OF_OK) {
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &props, &v) != OF_OK) {
         free(v.g);
         return 0;
     }
@@ -468,12 +515,13 @@ size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes)
 {
     GlyphVec v;
+    hb_segment_properties_t props = HB_SEGMENT_PROPERTIES_DEFAULT;
     size_t i;
     int64_t total = 0;
     if (!face || !utf8 || !bytes)
         return 0;
     memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &v) != OF_OK) {
+    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &props, &v) != OF_OK) {
         free(v.g);
         return 0;
     }
