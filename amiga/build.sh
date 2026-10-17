@@ -36,14 +36,21 @@ for cpu in 68040; do
     echo "$OUT/openfontrange-$cpu ($(wc -c < "$OUT/openfontrange-$cpu") bytes)"
 done
 
-# OpenFont's own reader and rasteriser, and their test (no FreeType): the
-# same fingerprints as on the host, the same bitmaps to the bit.
+# OpenFont's own reader, rasteriser and shaper, and their tests: the same
+# fingerprints as on the host, the same bitmaps and glyphs to the bit.
 for cpu in 68040; do
     "$CC" -m"$cpu" $SPECS -O2 -Wall -Wextra -Werror \
         -I "$ROOT/include" -I "$ROOT/src" \
         -o "$OUT/openfontreader-$cpu" \
         "$ROOT/tests/test_reader.c" "$ROOT/src/of_font.c" "$ROOT/src/of_cff.c" "$ROOT/src/of_raster.c"
     echo "$OUT/openfontreader-$cpu ($(wc -c < "$OUT/openfontreader-$cpu") bytes)"
+    # the shaper and the Unicode properties: the host's fingerprints too
+    "$CC" -m"$cpu" $SPECS -O2 -Wall -Wextra -Werror \
+        -I "$ROOT/include" -I "$ROOT/src" \
+        -o "$OUT/openfontshape-$cpu" \
+        "$ROOT/tests/test_shape.c" "$ROOT/src/of_font.c" "$ROOT/src/of_cff.c" "$ROOT/src/of_layout.c" \
+        "$ROOT/src/of_shape.c" "$ROOT/src/of_unicode_data.c"
+    echo "$OUT/openfontshape-$cpu ($(wc -c < "$OUT/openfontshape-$cpu") bytes)"
 done
 
 # The OpenMulticore path needs the NDK and openamigamulticore/include.
