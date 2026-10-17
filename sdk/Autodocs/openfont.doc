@@ -1,0 +1,456 @@
+TABLE OF CONTENTS
+
+openfont.library/--background--
+openfont.library/OF_AddFallback
+openfont.library/OF_AddFontDir
+openfont.library/OF_CacheGetGlyph
+openfont.library/OF_CacheMatchesFace
+openfont.library/OF_CharIndex
+openfont.library/OF_CloseCache
+openfont.library/OF_CloseFace
+openfont.library/OF_ErrorString
+openfont.library/OF_FindFaceA
+openfont.library/OF_FreeBitmap
+openfont.library/OF_GetFaceInfo
+openfont.library/OF_GetFallback
+openfont.library/OF_MeasureText
+openfont.library/OF_OpenCache
+openfont.library/OF_OpenFaceA
+openfont.library/OF_RasterGlyph
+openfont.library/OF_RescanFonts
+openfont.library/OF_SetSize
+openfont.library/OF_ShapeText
+openfont.library/OF_Version
+
+openfont.library/--background--                 openfont.library/--background--
+
+   PURPOSE
+	openfont.library is the Open stack's font service for AmigaOS 3.2 on
+	the 68040: finding a font, shaping text with OpenType's rules, its
+	metrics, and each glyph's pixels. Programs call it in place of
+	FreeType, HarfBuzz and fontconfig, which run inside it.
+
+	It is built for the 68040 with its FPU, and refuses to open on
+	anything exec does not report as one.
+
+   VERSION 1 IS A PREVIEW
+	Its calls and structures may still change. They are frozen from
+	version 2, once OpenFont's design tests pass. Open version 1
+	exactly if you depend on its layout.
+
+   TEXT
+	Text is UTF-8, with its length in bytes. Positions, advances and
+	metrics are 26.6 fixed point pixels: 64 is one pixel.
+
+   FACES
+	A face is one font of a file (a collection, .ttc or .otc, holds
+	several). Open one by path (OF_OpenFaceA) or by family
+	(OF_FindFaceA). A face has a pixel size, 16 when it opens.
+
+	A face may fall back to up to eight others (OF_AddFallback): where
+	it has no glyph for a cluster of the text, the next face in its
+	chain shapes that cluster. Each shaped glyph says which face it
+	came from (OFGlyph.gl_Face), and OF_GetFallback gives that face, to
+	draw the glyph with.
+
+	Faces are counted: a face added as a fallback is held by the face
+	it serves, and is freed when its last holder closes it.
+
+   THE FONT INDEX
+	OF_FindFaceA looks in FONTS:, LIBS:WebBrowser/Fonts, the folders
+	listed one a line in ENVARC:OpenFont/FontDirs, and any a program
+	adds with OF_AddFontDir. It knows each face's family, style, weight,
+	width and slant, kept in ENVARC:OpenFont/FontIndex, which it brings
+	up to date when a folder's date says something in it changed.
+
+	ENVARC:OpenFont/Aliases holds the user's own aliases, one a line:
+	    Name=Family,Family
+	OpenFont's own follow them: sans-serif, serif and monospace;
+	Arial, Helvetica, Times New Roman, Times, Courier New and Courier
+	(to the Liberation fonts, which keep their metrics); and others.
+	ENVARC:OpenFont/Fallbacks is the default fallback chain, families
+	separated by commas.
+
+   FILES AND TASKS
+	Calls that read files (opening a face or a cache, finding a face,
+	rescanning) must come from a process. From a plain task they fail
+	with OFERR_NOTPROCESS. The other calls may come from any task.
+
+   STACK
+	Every call does its work on the library's own stack, so callers need
+	no more than their usual. Calls from several tasks are taken one at
+	a time.
+
+   PATCHES
+	openfont.library patches nothing in the system.
+
+openfont.library/OF_AddFallback                 openfont.library/OF_AddFallback
+
+   NAME
+	OF_AddFallback -- add a face to another's fallback chain (V1)
+
+   SYNOPSIS
+	error = OF_AddFallback(face, fallback)
+	D0                     A0    A1
+
+	LONG OF_AddFallback(struct OFFace *, struct OFFace *);
+
+   FUNCTION
+	Adds fallback to the end of face's chain, and holds it: the caller
+	may close its own handle on fallback afterwards.
+
+   RESULT
+	error - OFERR_OK; OFERR_RANGE when the chain holds OF_MAX_FALLBACKS
+	        already; OFERR_ARGUMENT for a face falling back to itself,
+	        or to a face that falls back to it.
+
+   SEE ALSO
+	OF_GetFallback(), OF_ShapeText()
+
+openfont.library/OF_AddFontDir                   openfont.library/OF_AddFontDir
+
+   NAME
+	OF_AddFontDir -- look for fonts in one more folder (V1)
+
+   SYNOPSIS
+	error = OF_AddFontDir(dir)
+	D0                    A0
+
+	LONG OF_AddFontDir(CONST_STRPTR);
+
+   FUNCTION
+	Adds dir to the folders OF_FindFaceA looks in, until the library is
+	expunged. It is indexed the next time a face is found. To add a
+	folder for every program, list it in ENVARC:OpenFont/FontDirs.
+
+   RESULT
+	error - OFERR_OK (also when dir is listed already), or OFERR_RANGE
+	        when the library knows sixteen folders, its own and
+	        FontDirs' included.
+
+openfont.library/OF_CacheGetGlyph             openfont.library/OF_CacheGetGlyph
+
+   NAME
+	OF_CacheGetGlyph -- a glyph from a compiled cache (V1)
+
+   SYNOPSIS
+	error = OF_CacheGetGlyph(cache, pixels, codepoint, bitmap, glyph)
+	D0                       A0     D0      D1         A1      A2
+
+	LONG OF_CacheGetGlyph(struct OFCache *, ULONG, ULONG,
+	                      struct OFBitmap *, ULONG *);
+
+   FUNCTION
+	Fills bitmap with the codepoint's glyph at pixels, from the cache:
+	no font is read and nothing is rasterised. glyph, when not NULL,
+	receives its glyph number. Free the bitmap with OF_FreeBitmap.
+
+   RESULT
+	error - OFERR_OK; OFERR_RANGE when the cache has no such size or
+	        codepoint.
+
+openfont.library/OF_CacheMatchesFace       openfont.library/OF_CacheMatchesFace
+
+   NAME
+	OF_CacheMatchesFace -- was this cache compiled from this face (V1)
+
+   SYNOPSIS
+	match = OF_CacheMatchesFace(cache, face)
+	D0                          A0     A1
+
+	LONG OF_CacheMatchesFace(struct OFCache *, struct OFFace *);
+
+   FUNCTION
+	Compares the fingerprint the cache was compiled with to the face's
+	own, so a cache of an older font is never used for a newer one. The
+	first call for a face hashes its whole font, which is already in
+	memory, once.
+
+   RESULT
+	match - TRUE or FALSE.
+
+openfont.library/OF_CharIndex                     openfont.library/OF_CharIndex
+
+   NAME
+	OF_CharIndex -- the glyph a codepoint maps to (V1)
+
+   SYNOPSIS
+	glyph = OF_CharIndex(face, codepoint)
+	D0                   A0    D0
+
+	ULONG OF_CharIndex(struct OFFace *, ULONG);
+
+   RESULT
+	glyph - in this face alone, not its fallbacks; 0 when it has none.
+
+openfont.library/OF_CloseCache                   openfont.library/OF_CloseCache
+
+   NAME
+	OF_CloseCache -- close a compiled cache (V1)
+
+   SYNOPSIS
+	OF_CloseCache(cache)
+	              A0
+
+	VOID OF_CloseCache(struct OFCache *);
+
+openfont.library/OF_CloseFace                     openfont.library/OF_CloseFace
+
+   NAME
+	OF_CloseFace -- let go of a face (V1)
+
+   SYNOPSIS
+	OF_CloseFace(face)
+	             A0
+
+	VOID OF_CloseFace(struct OFFace *);
+
+   FUNCTION
+	The face is freed when its last holder lets go of it: the program
+	that opened it, and any face it is a fallback of. NULL is ignored.
+
+openfont.library/OF_ErrorString                 openfont.library/OF_ErrorString
+
+   NAME
+	OF_ErrorString -- what an error code means (V1)
+
+   SYNOPSIS
+	text = OF_ErrorString(error)
+	D0                    D0
+
+	CONST_STRPTR OF_ErrorString(LONG);
+
+   RESULT
+	text - in English, never NULL.
+
+openfont.library/OF_FindFaceA                     openfont.library/OF_FindFaceA
+
+   NAME
+	OF_FindFaceA -- open the best face for a family (V1)
+	OF_FindFace -- varargs stub for OF_FindFaceA
+
+   SYNOPSIS
+	face = OF_FindFaceA(family, tags)
+	D0                  A0      A1
+
+	struct OFFace *OF_FindFaceA(CONST_STRPTR, CONST struct TagItem *);
+
+	face = OF_FindFace(family, tag1, ...)
+
+   FUNCTION
+	Opens the face of the installed fonts that best matches family,
+	weight and slant: the family itself, then the user's aliases, then
+	OpenFont's own, then the generic family sans-serif. The default
+	fallback chain is added unless OFA_Fallbacks is FALSE. Brings the
+	font index up to date first if a folder has changed.
+
+	Must be called from a process.
+
+   INPUTS
+	family - a family name ("DejaVu Sans"), an alias ("Arial") or a
+	         generic family ("sans-serif", "serif", "monospace"). NULL
+	         means sans-serif.
+	tags - OFA_Weight (ULONG, 400), OFA_Italic (BOOL, FALSE),
+	       OFA_Size (ULONG, 16), OFA_Fallbacks (BOOL, TRUE),
+	       OFA_Error (LONG *).
+
+   RESULT
+	face - or NULL when no font is installed.
+
+openfont.library/OF_FreeBitmap                   openfont.library/OF_FreeBitmap
+
+   NAME
+	OF_FreeBitmap -- free a glyph's pixels (V1)
+
+   SYNOPSIS
+	OF_FreeBitmap(bitmap)
+	              A0
+
+	VOID OF_FreeBitmap(struct OFBitmap *);
+
+   FUNCTION
+	Frees bm_Pixels from OF_RasterGlyph or OF_CacheGetGlyph and clears
+	the structure. The structure itself is the caller's.
+
+openfont.library/OF_GetFaceInfo                 openfont.library/OF_GetFaceInfo
+
+   NAME
+	OF_GetFaceInfo -- a face's names and metrics (V1)
+
+   SYNOPSIS
+	error = OF_GetFaceInfo(face, info)
+	D0                     A0    A1
+
+	LONG OF_GetFaceInfo(struct OFFace *, struct OFFaceInfo *);
+
+   FUNCTION
+	Fills info: family and style, weight and width, flags (italic,
+	fixed width, scalable, colour), units per em, the glyph count, how
+	many faces its file holds, and the ascender, descender and line
+	height at the face's current pixel size.
+
+openfont.library/OF_GetFallback                 openfont.library/OF_GetFallback
+
+   NAME
+	OF_GetFallback -- one face of a fallback chain (V1)
+
+   SYNOPSIS
+	f = OF_GetFallback(face, n)
+	D0                 A0    D0
+
+	struct OFFace *OF_GetFallback(struct OFFace *, ULONG);
+
+   FUNCTION
+	n 0 is face itself; 1 to the chain's length, its fallbacks in
+	order. Use it with OFGlyph.gl_Face to draw a shaped glyph. The face
+	returned is not held for the caller: do not close it.
+
+   RESULT
+	f - or NULL past the end of the chain.
+
+openfont.library/OF_MeasureText                 openfont.library/OF_MeasureText
+
+   NAME
+	OF_MeasureText -- the advance of a shaped run (V1)
+
+   SYNOPSIS
+	advance = OF_MeasureText(face, utf8, bytes)
+	D0                       A0    A1    D0
+
+	LONG OF_MeasureText(struct OFFace *, CONST_STRPTR, ULONG);
+
+   RESULT
+	advance - the sum of the run's advances, 26.6, its fallbacks
+	          included. 0 on failure.
+
+openfont.library/OF_OpenCache                     openfont.library/OF_OpenCache
+
+   NAME
+	OF_OpenCache -- open a compiled glyph cache (V1)
+
+   SYNOPSIS
+	cache = OF_OpenCache(path)
+	D0                   A0
+
+	struct OFCache *OF_OpenCache(CONST_STRPTR);
+
+   FUNCTION
+	Reads a cache that openfontcompile made: a font's glyphs, compiled
+	once at the sizes a program uses most. Must be called from a
+	process.
+
+openfont.library/OF_OpenFaceA                     openfont.library/OF_OpenFaceA
+
+   NAME
+	OF_OpenFaceA -- open a face from a font file (V1)
+	OF_OpenFace -- varargs stub for OF_OpenFaceA
+
+   SYNOPSIS
+	face = OF_OpenFaceA(path, tags)
+	D0                  A0    A1
+
+	struct OFFace *OF_OpenFaceA(CONST_STRPTR, CONST struct TagItem *);
+
+	face = OF_OpenFace(path, tag1, ...)
+
+   FUNCTION
+	Reads a TrueType or OpenType font (.ttf, .otf, .ttc, .otc) into
+	memory and opens one of its faces. Must be called from a process.
+
+   INPUTS
+	path - the font file.
+	tags - OFA_Index (ULONG, 0): the face of a collection;
+	       OFA_Size (ULONG, 16): the pixel size to start at;
+	       OFA_Error (LONG *): why it failed.
+
+   RESULT
+	face - or NULL.
+
+openfont.library/OF_RasterGlyph                 openfont.library/OF_RasterGlyph
+
+   NAME
+	OF_RasterGlyph -- a glyph's 8-bit coverage (V1)
+
+   SYNOPSIS
+	error = OF_RasterGlyph(face, glyph, bitmap)
+	D0                     A0    D0     A1
+
+	LONG OF_RasterGlyph(struct OFFace *, ULONG, struct OFBitmap *);
+
+   FUNCTION
+	Draws glyph at the face's pixel size, antialiased, one byte a pixel
+	(0 clear, 255 solid), into a buffer the library allocates. Free it
+	with OF_FreeBitmap. An empty glyph (a space) gives a 0 by 0 bitmap
+	with bm_Pixels NULL, and its advance.
+
+openfont.library/OF_RescanFonts                 openfont.library/OF_RescanFonts
+
+   NAME
+	OF_RescanFonts -- rebuild the font index now (V1)
+
+   SYNOPSIS
+	error = OF_RescanFonts()
+	D0
+
+	LONG OF_RescanFonts(void);
+
+   FUNCTION
+	Reads every font folder again and saves the index, whether or not a
+	folder's date changed. OF_FindFaceA does this by itself when one
+	did; call this after changing a font in place. Must be called from
+	a process.
+
+openfont.library/OF_SetSize                         openfont.library/OF_SetSize
+
+   NAME
+	OF_SetSize -- set a face's pixel size (V1)
+
+   SYNOPSIS
+	error = OF_SetSize(face, pixels)
+	D0                 A0    D0
+
+	LONG OF_SetSize(struct OFFace *, ULONG);
+
+   FUNCTION
+	The size shaping, metrics and rasterising use from now on. A
+	fallback takes the size of the face it serves when it shapes.
+
+openfont.library/OF_ShapeText                     openfont.library/OF_ShapeText
+
+   NAME
+	OF_ShapeText -- shape a run of text into glyphs (V1)
+
+   SYNOPSIS
+	count = OF_ShapeText(face, utf8, bytes, glyphs, capacity)
+	D0                   A0    A1    D0     A2      D1
+
+	ULONG OF_ShapeText(struct OFFace *, CONST_STRPTR, ULONG,
+	                   struct OFGlyph *, ULONG);
+
+   FUNCTION
+	Shapes the text with OpenType's rules (ligatures, kerning, marks,
+	the script's own), guessing its script and direction. Clusters the
+	face has no glyphs for are shaped with its fallbacks, in order.
+	Writes up to capacity glyphs, in visual order.
+
+   INPUTS
+	glyphs - may be NULL, to learn how many to allocate.
+
+   RESULT
+	count - how many glyphs the run has, even when more than capacity.
+	        0 on failure.
+
+openfont.library/OF_Version                         openfont.library/OF_Version
+
+   NAME
+	OF_Version -- OpenFont's own version (V1)
+
+   SYNOPSIS
+	version = OF_Version()
+	D0
+
+	ULONG OF_Version(void);
+
+   RESULT
+	version - OpenFont's version (not the library's): major in the
+	          upper word, minor in the lower.

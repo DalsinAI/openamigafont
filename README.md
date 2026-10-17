@@ -8,11 +8,14 @@ removes direct application dependencies on FreeType, HarfBuzz and fontconfig:
 those projects are reference/implementation technology behind OpenFont while
 applications call OpenFont.
 
-Current phase: **bootstrap core, with a fast cache**. The x86/ARM64 build still
-uses FreeType and HarfBuzz inside OpenFont so the public API and the cache can
-be tested. Glyph lookup no longer walks the file, and a range of glyphs can run
-on extra cores or, with no cores board, as a plain loop on this CPU. The
-resident `openfont.library` is still to come.
+Current phase: **the resident library, a preview**. `openfont.library` 1.0 is
+OpenFont for AmigaOS 3.2 on the 68040, with FreeType 2.14.3 and HarfBuzz
+14.5.1 inside it. It finds fonts by family through its own font index, and a
+face falls back to others for the characters it has no glyphs for. Its calls
+may still change until version 2. The same core builds on the x86 and ARM64
+cores, where the tests run. Glyph lookup in a compiled cache does not walk the
+file, and a range of glyphs can run on extra cores or, with no cores board, as
+a plain loop on this CPU.
 
 ## Architecture
 
@@ -31,24 +34,40 @@ OpenBrowser / OpenWrite / OpenLayout / native applications
 OpenFont owns text semantics. OpenGfx paints positioned glyph runs. OpenGPU is
 only the execution/acceleration layer and does not understand Unicode shaping.
 
-## Bootstrap API
+## The core
 
-`include/openfont/openfont.h` exposes:
+`include/openfont/openfont.h` is the core the library is built from, and what
+the host tests call:
 
-- face open/close;
-- pixel-size selection;
-- UTF-8 shaping to positioned glyph runs;
-- UTF-8 measurement;
+- faces opened from a file or from memory, one face of a collection, counted
+  so a face can be shared;
+- pixel-size selection, and a face's names and metrics (`of_face_info`);
+- UTF-8 shaping to positioned glyph runs, and measurement;
+- fallback: up to eight faces after a face, each cluster it has no glyphs for
+  shaped by the first that has them, and each glyph marked with the face it
+  came from;
 - A8 glyph rasterisation;
-- a portable compiled bitmap-cache writer.
+- a portable compiled bitmap-cache writer and reader.
 
-The cache writer is intentionally useful before the full resident library:
-common font sizes can be compiled once so the 68k does no font parsing or
-rasterisation on a cache hit.
+[src/openfont_index.h](src/openfont_index.h) is the font index: the faces of
+a few folders by family, style, weight and slant, kept in a text file and read
+again only when a folder's date changes; aliases (`Arial` to Liberation Sans,
+`monospace` to DejaVu Sans Mono, the user's own); and the default fallback
+chain.
+
+Files are read and folders listed through
+[src/openfont_io.h](src/openfont_io.h): stdio and POSIX on the host,
+dos.library in the library.
+
+The cache writer is useful before anything else: common font sizes can be
+compiled once so the 68k does no font parsing or rasterisation on a cache
+hit.
 
 ## Build on the x86 or ARM64 cores
 
 Requirements: CMake, pkg-config, FreeType and HarfBuzz development packages.
+The index test needs the DejaVu and Liberation fonts (`fonts-dejavu-core`,
+`fonts-liberation2` on Debian and Ubuntu), and is left out without them.
 
 ```sh
 cmake -S . -B build
@@ -112,12 +131,92 @@ On lab `openfont` (14 Oct 2026), that 68000 program built with OpenAmigaGCC
 worker on the cores board (`OMCW_BOARD`). A NULL base, a revision-2 library
 and a count below the break-even still match the CPU loop.
 
-## Amiga target
+## openfont.library
 
-The resident `openfont.library` will be added after this bootstrap core is
-qualified. The target platform is AmigaOS 3.2.3 on a 68040 + FPU, with clean
-fallbacks for ordinary 68k execution and accelerated AC090 leaves for shaping,
-glyph rasterisation and atlas building.
+The resident library is for AmigaOS 3.2 on a 68040 with its FPU, and only
+that: it does not open on another CPU. Later, AC090 leaves may take shaping,
+glyph rasterisation and atlas building, with the same results.
+
+It holds the core, the index, FreeType (TrueType and CFF outlines, their
+hinting, both rasterisers) and HarfBuzz, about 1.4 MB. Inside it:
+
+- one lock: calls from several tasks are taken one at a time;
+- its own 64 KB stack, so callers need no more than their usual;
+- one memory pool for everything FreeType, HarfBuzz and the core allocate,
+  freed whole when the library is expunged;
+- no C startup and no stdio; files through dos.library, only for processes
+  (a plain task gets `OFERR_NOTPROCESS`);
+- no patches to the system.
+
+### Fonts
+
+`OF_FindFace` looks in `FONTS:`, `LIBS:WebBrowser/Fonts`, each folder listed
+one a line in `ENVARC:OpenFont/FontDirs`, and folders a program adds. It keeps
+what it found in `ENVARC:OpenFont/FontIndex`.
+
+`ENVARC:OpenFont/Aliases` holds the user's aliases, one a line
+(`Name=Family,Family`), before OpenFont's own. `ENVARC:OpenFont/Fallbacks` is
+the default fallback chain (`DejaVu Sans,Noto Sans,Liberation Sans,DejaVu Sans
+Mono` without it).
+
+### Using it
+
+```c
+#include <proto/openfont.h>
+
+struct Library *OpenFontBase = OpenLibrary("openfont.library", 1);
+struct OFFace *face = OF_FindFace("sans-serif", OFA_Size, 16, TAG_END);
+struct OFGlyph glyphs[64];
+ULONG n = OF_ShapeText(face, text, strlen(text), glyphs, 64);
+/* glyphs[i].gl_Face is the face of the chain each glyph came from:
+   OF_GetFallback(face, glyphs[i].gl_Face) draws it */
+OF_CloseFace(face);
+CloseLibrary(OpenFontBase);
+```
+
+[sdk](sdk) is what a program needs: the SFD, the C and assembler headers
+(`Include_H`, `Include_I`), the FD file, and the autodoc
+([sdk/Autodocs/openfont.doc](sdk/Autodocs/openfont.doc)). The varargs calls
+`OF_OpenFace` and `OF_FindFace` are in `libopenfont.a`, which the build makes
+from [sdk/stubs](sdk/stubs). Every call does its work on the library's stack.
+
+### Building it
+
+[amiga/build-library.sh](amiga/build-library.sh) builds it with OpenAmigaGCC
+16.2.0-open2 (the `os32-gcc16` stove's compiler), `-m68040 -m68881`:
+
+```sh
+NDK=/path/to/OpenNDK/Include_H sh amiga/build-library.sh
+```
+
+- `CC`, `CXX`: the compilers, when not in the stove or under `/opt`;
+- `NDK`: AmigaOS headers, when the compiler has none of its own;
+- `TARBALLS`: where the FreeType and HarfBuzz releases are kept. Each is
+  checked against [amiga/SOURCES](amiga/SOURCES), and fetched when missing.
+  Nothing upstream is ever committed;
+- `FREETYPE_GIT`: a clone of FreeType's Git mirror at the commit SOURCES pins,
+  when the release can't be fetched.
+
+It writes `build/amiga/openfont.library`, its link map, `libopenfont.a` and
+`OpenFontLibTest`. It fails when the library leaves a symbol undefined (libnix
+gives it only stateless functions: memory, strings, `qsort`, `setjmp`), or
+when its code does not start with `start()`. [build-amiga.sh](build-amiga.sh)
+is the same build for a Cradle stove, which sets `STOVE` and `OUT`.
+
+### Checking it
+
+Copy `openfont.library` to `LIBS:`, then, from a shell with a 4 KB stack:
+
+```text
+OpenFontLibTest FONT/A,FONTDIR/A,CACHE
+```
+
+`FONT` is `DejaVuSans.ttf`, `FONTDIR` a folder with the DejaVu and Liberation
+fonts, and `CACHE` an `.ofc` made from `FONT` on the host. It shapes and
+rasterises `FONT` at 16 pixels and expects the host's glyphs, advance and
+pixels byte for byte (the host's `test_openfont` prints the same hash), then checks the
+index, the aliases, the snowman from a fallback and `OFERR_NOTPROCESS` from a
+plain task. It ends with `OPENFONTLIB PASS`. It has not yet run on a lab.
 
 ## Compatibility
 

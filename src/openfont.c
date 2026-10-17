@@ -22,7 +22,10 @@ struct OFFace {
     uint32_t pixel_size;
     uint32_t refs;
     uint8_t *data;                  /* the font file, owned when take was set */
+    size_t data_size;
+    uint32_t face_index;
     int owns_data;
+    int have_fingerprint;           /* worked out the first time a cache asks */
     uint64_t source_fingerprint;
     uint32_t nfallbacks;
     OFFace *fallbacks[OF_MAX_FALLBACKS];
@@ -78,6 +81,8 @@ OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
     face->ctx = ctx;
     face->refs = 1;
     face->data = data;
+    face->data_size = size;
+    face->face_index = face_index;
     face->owns_data = take;
     if (FT_New_Memory_Face(ctx->ft, data, (FT_Long)size, (FT_Long)face_index, &face->ft_face)) {
         if (take)
@@ -93,8 +98,6 @@ OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
         free(face);
         return NULL;
     }
-    /* the file and the face in it: two faces of one collection differ */
-    face->source_fingerprint = fingerprint_bytes(data, size) ^ ((uint64_t)face_index * UINT64_C(0x9E3779B97F4A7C15));
     if (of_face_set_pixel_size(face, 16) != OF_OK) {
         of_face_close(face);
         return NULL;
@@ -517,9 +520,20 @@ int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out)
     return OF_OK;
 }
 
+/* The file and the face in it: two faces of one collection differ. Worked
+ * out when a cache first asks, since it reads the whole file: a second on a
+ * real 68040 for a large font, and most programs never need it. */
 uint64_t of_face_source_fingerprint(const OFFace *face)
 {
-    return face ? face->source_fingerprint : 0;
+    OFFace *f = (OFFace *)face;
+    if (!f || !f->data)
+        return 0;
+    if (!f->have_fingerprint) {
+        f->source_fingerprint = fingerprint_bytes(f->data, f->data_size) ^
+                                ((uint64_t)f->face_index * UINT64_C(0x9E3779B97F4A7C15));
+        f->have_fingerprint = 1;
+    }
+    return f->source_fingerprint;
 }
 
 int of_cache_matches_face(const OFCache *cache, const OFFace *face)
@@ -559,7 +573,7 @@ int of_compile_cache(OFFace *face, const char *path,
 
     if (!face || !path || !sizes || !size_count || first_codepoint > last_codepoint)
         return OF_ERR_ARGUMENT;
-    if (!face->source_fingerprint)
+    if (!of_face_source_fingerprint(face))
         return OF_ERR_FONT;
     span = (size_t)last_codepoint - first_codepoint + 1;
     ins = (OFCacheSizeIn *)calloc(size_count, sizeof(*ins));
@@ -599,7 +613,7 @@ int of_compile_cache(OFFace *face, const char *path,
         }
     }
 
-    rc = of_cache_write(path, face->source_fingerprint, first_codepoint,
+    rc = of_cache_write(path, of_face_source_fingerprint(face), first_codepoint,
                         last_codepoint, ins, size_count);
     free_sizes(ins, size_count);
     return rc;
