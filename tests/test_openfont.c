@@ -12,6 +12,18 @@ static uint32_t hash_bytes(uint32_t h, const unsigned char *p, size_t n)
     return h;
 }
 
+/* a number's bytes low first, whatever this machine's byte order, so the
+ * 68k lab test (tests/amiga/OpenFontLibTest.c) gets the same hash */
+static uint32_t hash_u32(uint32_t h, uint32_t v)
+{
+    unsigned char b[4];
+    b[0] = (unsigned char)v;
+    b[1] = (unsigned char)(v >> 8);
+    b[2] = (unsigned char)(v >> 16);
+    b[3] = (unsigned char)(v >> 24);
+    return hash_bytes(h, b, 4);
+}
+
 int main(int argc, char **argv)
 {
     static const char text[] = "Office AVWa fi \xC3\xA9";
@@ -40,8 +52,8 @@ int main(int argc, char **argv)
         return 1;
     advance = of_measure_utf8(face, text, strlen(text));
     for (i = 0; i < n; ++i) {
-        hash = hash_bytes(hash, (const unsigned char *)&glyphs[i].glyph_id, sizeof(glyphs[i].glyph_id));
-        hash = hash_bytes(hash, (const unsigned char *)&glyphs[i].x_advance_26_6, sizeof(glyphs[i].x_advance_26_6));
+        hash = hash_u32(hash, glyphs[i].glyph_id);
+        hash = hash_u32(hash, (uint32_t)glyphs[i].x_advance_26_6);
     }
     if (of_raster_glyph_a8(face, glyphs[0].glyph_id, &bitmap) != OF_OK)
         return 1;

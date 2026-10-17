@@ -1,0 +1,10 @@
+# The upstream sources openfont.library builds in. Fetched at build time and
+# checked here; never committed (amiga/tarballs/ is ignored).
+#
+# FreeType 2.14.3: the release tarball, or FreeType's own Git mirror at the
+# release tag's commit (the tarball's site may be out of reach). Either is
+# checked: the tarball by its SHA-256, the tree by its commit.
+freetype  freetype-2.14.3.tar.xz  36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f  https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz
+freetype-git  VER-2-14-3  0a0221a1347e2f1e07c395263540026e9a0aa7c7  https://github.com/freetype/freetype
+# HarfBuzz 14.5.1
+harfbuzz  harfbuzz-14.5.1.tar.xz  7e2fa4e8c7c98e8d8140671f5772542afaaa6acccfbd746506886b6d85f7f8d6  https://github.com/harfbuzz/harfbuzz/releases/download/14.5.1/harfbuzz-14.5.1.tar.xz

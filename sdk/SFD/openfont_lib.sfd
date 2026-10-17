@@ -1,0 +1,40 @@
+==id OpenFont openfont_lib.sfd 1.0
+* openfont.library's calls: fonts, shaping, glyphs and the font index.
+* Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
+* Version 1 is a preview: its calls may still change. They are frozen from
+* version 2, once the design's tests pass (amigachrome
+* docs/design/native-stack/Design-OpenFont.md, sections 4 and 12).
+==base _OpenFontBase
+==basetype struct Library *
+==libname openfont.library
+==bias 30
+==public
+==include <exec/types.h>
+==include <utility/tagitem.h>
+==include <libraries/openfont.h>
+==version 1
+ULONG OF_Version() ()
+struct OFFace * OF_OpenFaceA(CONST_STRPTR path, CONST struct TagItem * tags) (a0,a1)
+==varargs
+struct OFFace * OF_OpenFace(CONST_STRPTR path, Tag tag1, ...) (a0,a1)
+VOID OF_CloseFace(struct OFFace * face) (a0)
+LONG OF_SetSize(struct OFFace * face, ULONG pixels) (a0,d0)
+LONG OF_GetFaceInfo(struct OFFace * face, struct OFFaceInfo * info) (a0,a1)
+ULONG OF_ShapeText(struct OFFace * face, CONST_STRPTR utf8, ULONG bytes, struct OFGlyph * glyphs, ULONG capacity) (a0,a1,d0,a2,d1)
+LONG OF_MeasureText(struct OFFace * face, CONST_STRPTR utf8, ULONG bytes) (a0,a1,d0)
+LONG OF_RasterGlyph(struct OFFace * face, ULONG glyph, struct OFBitmap * bitmap) (a0,d0,a1)
+VOID OF_FreeBitmap(struct OFBitmap * bitmap) (a0)
+struct OFFace * OF_FindFaceA(CONST_STRPTR family, CONST struct TagItem * tags) (a0,a1)
+==varargs
+struct OFFace * OF_FindFace(CONST_STRPTR family, Tag tag1, ...) (a0,a1)
+LONG OF_AddFontDir(CONST_STRPTR dir) (a0)
+LONG OF_AddFallback(struct OFFace * face, struct OFFace * fallback) (a0,a1)
+struct OFFace * OF_GetFallback(struct OFFace * face, ULONG n) (a0,d0)
+ULONG OF_CharIndex(struct OFFace * face, ULONG codepoint) (a0,d0)
+struct OFCache * OF_OpenCache(CONST_STRPTR path) (a0)
+VOID OF_CloseCache(struct OFCache * cache) (a0)
+LONG OF_CacheGetGlyph(struct OFCache * cache, ULONG pixels, ULONG codepoint, struct OFBitmap * bitmap, ULONG * glyph) (a0,d0,d1,a1,a2)
+LONG OF_CacheMatchesFace(struct OFCache * cache, struct OFFace * face) (a0,a1)
+CONST_STRPTR OF_ErrorString(LONG code) (d0)
+LONG OF_RescanFonts() ()
+==end
