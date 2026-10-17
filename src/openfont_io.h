@@ -28,8 +28,8 @@ int of_io_list_dir(const char *dir, OFDirFn fn, void *arg);
  * nanoseconds on the host). OF_OK or OF_ERR_IO. */
 int of_io_stamp(const char *path, uint32_t stamp[3]);
 
-/* A file opened for reading at any offset (FreeType reads a font's
- * tables this way when it only needs a few of them, as the index does). */
+/* A file opened for reading at any offset (the index reads only
+ * the tables that describe a face this way). */
 typedef struct OFFile OFFile;
 OFFile *of_io_open(const char *path, uint32_t *size);
 /* Reads count bytes at offset into buf. Returns the bytes read. */

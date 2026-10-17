@@ -1,8 +1,9 @@
 #ifndef LIBRARIES_OPENFONT_H
 #define LIBRARIES_OPENFONT_H
 /* openfont.library: fonts, shaping, glyphs and the font index for AmigaOS
- * 3.2 on the 68040. Programs call it in place of FreeType, HarfBuzz and
- * fontconfig; see Autodocs/openfont.doc.
+ * 3.2 on the 68040, with its own font reader and rasteriser. Programs call
+ * it in place of FreeType, HarfBuzz and fontconfig; see
+ * Autodocs/openfont.doc.
  *
  * Version 1 is a preview: its calls and structures may still change. They
  * are frozen from version 2, once OpenFont's design tests pass.

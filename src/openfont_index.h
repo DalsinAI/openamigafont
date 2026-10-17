@@ -58,7 +58,7 @@ int of_index_save(const OFIndex *ix, const char *path);
  * scanned: of_index_scan then brings the index up to date. */
 int of_index_stale(const OFIndex *ix);
 
-/* Rescans every folder with ctx (FreeType reads the faces' tables). */
+/* Rescans every folder with ctx (OpenFont reads the faces' tables). */
 int of_index_scan(OFIndex *ix, OFContext *ctx);
 
 /* The best face for a family, weight (100-900) and slant: the family

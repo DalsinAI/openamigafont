@@ -4,7 +4,7 @@
  * sdk/Autodocs/openfont.doc.
  *
  * How it holds together:
- * - one lock: every call into the core (FreeType, HarfBuzz, the index, the
+ * - one lock: every call into the core (OpenFont's reader, HarfBuzz, the index, the
  *   memory pool) holds the library's SignalSemaphore, so the engines run as
  *   if single-threaded, which is how they are built (HB_NO_MT);
  * - one stack: under that lock the work runs on the library's own 64 KB
@@ -74,7 +74,7 @@ struct OpenFontBase {
     ULONG depth;
     APTR stack;
     struct StackSwapStruct sss;
-    OFContext *ctx;                 /* FreeType's library, made on first use */
+    OFContext *ctx;                 /* the core's context, made on first use */
     OFIndex index;
     int index_ready;                /* folders and settings read, index loaded */
 };
@@ -689,7 +689,7 @@ const struct Resident lib_romtag __attribute__((used)) = {
     (char *)lib_name, (char *)lib_id, (APTR)&lib_inittable
 };
 
-/* Expunge runs under Forbid: nothing here may wait. Every byte FreeType,
+/* Expunge runs under Forbid: nothing here may wait. Every byte the reader,
  * HarfBuzz and the index hold is in the pool, so deleting it is enough,
  * and none of their code runs here. */
 static void lib_free(struct OpenFontBase *b)

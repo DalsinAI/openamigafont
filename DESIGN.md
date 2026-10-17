@@ -1,6 +1,7 @@
 # OpenFont design
 
-Version 0.2 — 17 October 2026 (0.1, 8 October: §1–§5, and the tests)
+Version 0.3 — 17 October 2026 (0.2: the resident library; 0.1, 8 October:
+§1–§5, and the tests)
 
 ## 1. Decision
 
@@ -13,8 +14,19 @@ The public dependency direction is:
 application -> openfont.library -> OpenGfx -> OpenGPU
 ```
 
-FreeType/HarfBuzz may be used internally while the native implementation is
-brought up, but their APIs are not the architecture.
+OpenFont's own code replaces FreeType and HarfBuzz inside it, in stages, each
+from the published specifications only (the OpenType specification, the
+Unicode Standard), never from their code:
+
+1. the font reader and the rasteriser (FreeType out): done, 17 October 2026;
+2. the shaper for Latin (cmap, GPOS pair kerning and `kern`, GSUB ligatures,
+   simple mark attachment), HarfBuzz out;
+3. the text functions: UTF-8/16, Unicode properties from the UCD, line breaks
+   (UAX #14), grapheme and word boundaries (UAX #29), NFC and IDNA, so
+   OpenFont is the one place for them and can later take ICU's place for
+   WebKit.
+
+Their APIs are not the architecture: the core API stays as it is.
 
 ## 2. Responsibilities
 
@@ -67,16 +79,16 @@ reports both the CPU and its FPU: not on another CPU, nor on an LC040. Version 1
 preview: its calls and structures may change. Version 2 freezes them, once the
 tests in §7 pass on a lab and on real 68040 hardware.
 
-**One lock.** FreeType and HarfBuzz keep state in the faces and the library, so
+**One lock.** HarfBuzz and the core keep state in the faces and the library, so
 every call takes one SignalSemaphore and runs alone. The semaphore nests, so a
 task already inside the library does not wait for itself.
 
-**Its own stack.** HarfBuzz's shaping and FreeType's hinting need more stack
+**Its own stack.** HarfBuzz's shaping needs more stack
 than an Amiga program is given. Each outermost call swaps (`StackSwap`) to a
 64 KB stack the library owns, does its work, and swaps back, so callers need no
 more than their usual.
 
-**One pool.** Everything FreeType, HarfBuzz and the core allocate comes from
+**One pool.** Everything HarfBuzz and the core allocate comes from
 one Exec pool, with an eight-byte header per block for its size and a check
 word. Expunging the library deletes the pool, so nothing it allocated
 outlives it. The library has no C startup, no stdio and no constructors: libnix
@@ -125,7 +137,11 @@ checked against a cache, not when it opens.
 The reference gate includes:
 
 - glyph-for-glyph HarfBuzz comparison;
-- bitmap comparison with FreeType;
+- the reader and rasteriser against FreeType 2.14.3 unhinted
+  (`compare_freetype`): cmap, names, flags, line metrics, advances and bitmap
+  boxes exact, pixels within 64 of 255 and a mean within 2.5;
+- the reader on damaged fonts (`test_reader`, under the sanitisers), and its
+  bitmaps the same to the bit on the 68040 as on the host;
 - cache round-trip and corruption tests;
 - big-endian cache parsing;
 - UTF-8, bidi, combining marks and fallback cases;

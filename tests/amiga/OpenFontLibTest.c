@@ -4,7 +4,8 @@
  *
  * FONT is DejaVuSans.ttf: the shaping and raster hash must be the one the
  * host's tests/test_openfont.c prints for it at 16 pixels (EXPECT below),
- * since both run FreeType 2.14.3 and HarfBuzz 14.5.1. FONTDIR holds DejaVu
+ * since both run OpenFont's own reader and rasteriser (integers only) and
+ * HarfBuzz 14.5.1. FONTDIR holds DejaVu
  * and Liberation, for the index, the aliases and fallback. CACHE is an
  * .ofc file openfontcompile made on the host from FONT (sizes 9 12 16 24).
  *
@@ -28,7 +29,7 @@
 /* tests/test_openfont.c on the host, DejaVuSans.ttf at 16 pixels */
 #define EXPECT_GLYPHS 13
 #define EXPECT_ADVANCE 8155
-#define EXPECT_HASH 0x79cfa8e6UL
+#define EXPECT_HASH 0x3a37fb49UL
 
 struct Library *OpenFontBase;
 static int fails;
