@@ -4,9 +4,9 @@
  * sdk/Autodocs/openfont.doc.
  *
  * How it holds together:
- * - one lock: every call into the core (OpenFont's reader, HarfBuzz, the index, the
- *   memory pool) holds the library's SignalSemaphore, so the engines run as
- *   if single-threaded, which is how they are built (HB_NO_MT);
+ * - one lock: every call into the core (the reader, the shaper, the index,
+ *   the memory pool) holds the library's SignalSemaphore, so the core runs
+ *   as if single-threaded, which is how it is written;
  * - one stack: under that lock the work runs on the library's own 64 KB
  *   stack (of_stack.c), whatever the caller's;
  * - one pool: every byte the engines allocate comes from it (of_runtime.c),
@@ -690,7 +690,7 @@ const struct Resident lib_romtag __attribute__((used)) = {
 };
 
 /* Expunge runs under Forbid: nothing here may wait. Every byte the reader,
- * HarfBuzz and the index hold is in the pool, so deleting it is enough,
+ * the shaper and the index hold is in the pool, so deleting it is enough,
  * and none of their code runs here. */
 static void lib_free(struct OpenFontBase *b)
 {

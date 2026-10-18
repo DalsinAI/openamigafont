@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libharfbuzz-dev fonts-dejavu-core fonts-liberation2
+        run: sudo apt-get update && sudo apt-get install -y cmake fonts-dejavu-core fonts-liberation2
       - name: Configure
         run: cmake -S . -B build
       - name: Build

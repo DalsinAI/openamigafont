@@ -5,13 +5,13 @@ OpenFont is the native modern font service for the Open Amiga stack.
 It gives Amiga applications one API for font discovery, shaping, measurement,
 glyph rasterisation and compiled glyph caches. The production architecture
 removes direct application dependencies on FreeType, HarfBuzz and fontconfig.
-OpenFont reads and draws fonts with its own code, written from the published
-specifications; HarfBuzz still shapes inside it until OpenFont's own shaper
-replaces it.
+OpenFont reads, shapes and draws fonts with its own code, written from the
+published specifications (the OpenType specification, the Unicode
+Standard).
 
 Current phase: **the resident library, a preview**. `openfont.library` 1.0 is
-OpenFont for AmigaOS 3.2 on the 68040, with its own font reader and
-rasteriser and HarfBuzz 14.5.1 inside it. It finds fonts by family through its own font index, and a
+OpenFont for AmigaOS 3.2 on the 68040, with its own font reader, rasteriser
+and shaper inside it. It finds fonts by family through its own font index, and a
 face falls back to others for the characters it has no glyphs for. Its calls
 may still change until version 2. The same core builds on the x86 and ARM64
 cores, where the tests run. Glyph lookup in a compiled cache does not walk the
@@ -80,6 +80,40 @@ on the host.
 Glyphs are unhinted: the pixels follow the outline exactly at every size. That
 is a change from the hinted FreeType output before.
 
+### The shaper
+
+[src/of_shape.c](src/of_shape.c) and [src/of_layout.c](src/of_layout.c) turn
+UTF-8 into positioned glyphs, written from the OpenType specification and the
+Unicode Standard, with no HarfBuzz code:
+
+- UTF-8 decoded with each byte that starts no valid sequence shown as one
+  U+FFFD; clusters as byte offsets, marks and joiners in the cluster before;
+- characters the font lacks decomposed into ones it has, marks in canonical
+  order, base and marks composed again where the font has the result;
+- spaces the font lacks drawn as its space, as wide as each should be;
+- GSUB (all eight lookup types) with the default features: `ccmp`, `locl`,
+  `rlig`, `calt`, `clig`, `liga`, `rclt`, and `frac`/`numr`/`dnom` around
+  U+2044; GPOS (all nine) with `kern`, `mark`, `mkmk`, `curs`, `dist`,
+  `abvm`, `blwm`, and the old `kern` table when GPOS has no kerning; GDEF
+  classes and mark filtering; device tables at the pixel size;
+- marks' advances zeroed and marks placed on their bases' anchors;
+- the default ignorables (ZWJ, ZWNJ, soft hyphen...) hidden; ZWNJ keeps
+  ligatures apart;
+- the unsafe-to-break flags.
+
+It shapes left to right, for scripts written letter by letter: Latin, Greek,
+Cyrillic, and the like. Right-to-left text (Arabic, Hebrew) comes out in
+logical order without Arabic joining, and the Indic scripts without their
+reordering, for now.
+
+[src/of_unicode.h](src/of_unicode.h) gives the Unicode properties it needs:
+general category, combining class, script, default ignorables, canonical
+decomposition and composition. `src/of_unicode_data.c` is generated from the
+Unicode Character Database 16.0.0 by
+[tools/gen_unicode.py](tools/gen_unicode.py) (about 100 KB of tables); the
+data is under the Unicode License v3
+([LICENSES/Unicode-License-v3.txt](LICENSES/Unicode-License-v3.txt)).
+
 [src/openfont_index.h](src/openfont_index.h) is the font index: the faces of
 a few folders by family, style, weight and slant, kept in a text file and read
 again only when a folder's date changes; aliases (`Arial` to Liberation Sans,
@@ -96,9 +130,7 @@ hit.
 
 ## Build on the x86 or ARM64 cores
 
-Requirements: CMake, and HarfBuzz: its development package (pkg-config), or
-its release's sources (`-DOPENFONT_HARFBUZZ_SOURCE=/path/to/harfbuzz-14.5.1`,
-built in). FreeType is not needed.
+Requirements: CMake and a C compiler; nothing else.
 The index test needs the DejaVu and Liberation fonts (`fonts-dejavu-core`,
 `fonts-liberation2` on Debian and Ubuntu), and is left out without them.
 
@@ -129,6 +161,29 @@ and a mean of 2.6 on CFF fonts at 9 pixels.
 On 17 October 2026 it passed on 63 font files of this PC: DejaVu and
 Liberation (TrueType), the URW base 35 fonts (CFF), and the Noto CJK
 collections (CID-keyed CFF, two faces of each), 335 font sizes.
+
+The shaper's gate compares it with HarfBuzz 14.5.1, given HarfBuzz's release
+sources (built for the test only):
+
+```sh
+cmake -S . -B build -DOPENFONT_HARFBUZZ_REF=/path/to/harfbuzz-14.5.1
+build/compare_harfbuzz TEXTFILE FONT...
+```
+
+Each line of the text, and some broken UTF-8, at 12, 16 and 33 pixels:
+HarfBuzz (its OpenType functions, OpenFont's advances, script and direction
+guessed) and OpenFont must give the same glyphs, clusters, advances, offsets
+and unsafe-to-break flags. Right-to-left runs are counted apart. One
+difference is allowed: HarfBuzz places a .notdef mark in a font with no GPOS
+by a rule of its own, which OpenFont does not copy.
+
+On 17 October 2026 it passed on 58 fonts (DejaVu, Liberation, the URW
+fonts, Noto Sans CJK) with [tests/shape/latin.txt](tests/shape/latin.txt)
+(5,742 runs), [tests/shape/latin-random.txt](tests/shape/latin-random.txt)
+(53,418 runs: letters, accents composed and decomposed, ligatures, kerning
+pairs, fractions, hidden characters) and this README and DESIGN.md as text
+(62,466 runs). The only differences were .notdef marks in Nimbus Mono PS,
+which has no GPOS.
 
 Compile common sizes:
 
@@ -199,12 +254,12 @@ that: it does not open on another CPU, or on a 68040 without its FPU (an
 LC040). Later, AC090 leaves may take shaping,
 glyph rasterisation and atlas building, with the same results.
 
-It holds the core, the index, OpenFont's reader and rasteriser, and HarfBuzz,
-about 1.0 MB. Inside it:
+It holds the core, the index, and OpenFont's reader, rasteriser and shaper,
+about 200 KB. Inside it:
 
 - one lock: calls from several tasks are taken one at a time;
 - its own 64 KB stack, so callers need no more than their usual;
-- one memory pool for everything HarfBuzz and the core allocate,
+- one memory pool for everything the core allocates,
   freed whole when the library is expunged;
 - no C startup and no stdio; files through dos.library, only for processes
   (a plain task gets `OFERR_NOTPROCESS`);
@@ -251,15 +306,14 @@ from [sdk/stubs](sdk/stubs). Every call does its work on the library's stack.
 NDK=/path/to/OpenNDK/Include_H sh amiga/build-library.sh
 ```
 
-- `CC`, `CXX`: the compilers, when not in the stove or under `/opt`;
-- `NDK`: AmigaOS headers, when the compiler has none of its own;
-- `TARBALLS`: where the HarfBuzz release is kept. It is checked against
-  [amiga/SOURCES](amiga/SOURCES), and fetched when missing. Nothing upstream
-  is ever committed.
+- `CC`: the compiler, when not in the stove or under `/opt`;
+- `NDK`: AmigaOS headers, when the compiler has none of its own.
+
+It builds from OpenFont's own sources alone; nothing upstream is fetched.
 
 It writes `build/amiga/openfont.library`, its link map, `libopenfont.a` and
 `OpenFontLibTest`. It fails when the library leaves a symbol undefined (libnix
-gives it only stateless functions: memory, strings, `qsort`, `setjmp`), or
+gives it only stateless functions: memory, strings, `qsort`), or
 when its code does not start with `start()`. [build-amiga.sh](build-amiga.sh)
 is the same build for a Cradle stove, which sets `STOVE` and `OUT`.
 
@@ -286,8 +340,10 @@ FreeType/HarfBuzz compatibility headers will be provided for the subset needed
 by existing ports, but they are compatibility front ends. New Open software
 uses OpenFont directly.
 
-MIT licensed AmigaChrome Team code. HarfBuzz keeps its own upstream licence
-(MIT) in `openfont.library`, until OpenFont's own shaper replaces it; the
-build copies it to `build/amiga/licences`, and it goes wherever the library
-is copied. FreeType is no longer in OpenFont; the reference test builds
-against a separate FreeType tree.
+MIT licensed AmigaChrome Team code. The Unicode data tables in
+`src/of_unicode_data.c` are generated from the Unicode Character Database and
+are under the Unicode License v3
+([LICENSES/Unicode-License-v3.txt](LICENSES/Unicode-License-v3.txt)); the
+build copies that licence to `build/amiga/licences`, and it goes wherever the
+library is copied. FreeType and HarfBuzz are no longer in OpenFont; the
+reference tests build against separate trees of theirs.
