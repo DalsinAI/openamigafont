@@ -33,5 +33,6 @@
 #pragma libcall OpenFontBase OF_RescanFonts 90 00
 #pragma libcall OpenFontBase OF_RasterGlyphMatrix 96 a90804
 #pragma libcall OpenFontBase OF_GlyphAdvance 9c 0802
+#pragma libcall OpenFontBase OF_OpenTextFont a2 801
 
 #endif /* PRAGMAS_OPENFONT_PRAGMAS_H */
