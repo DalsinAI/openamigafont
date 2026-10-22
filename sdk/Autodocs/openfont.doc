@@ -12,11 +12,13 @@ openfont.library/OF_ErrorString
 openfont.library/OF_FindFaceA
 openfont.library/OF_FreeBitmap
 openfont.library/OF_GetFaceInfo
+openfont.library/OF_GlyphAdvance
 openfont.library/OF_GetFallback
 openfont.library/OF_MeasureText
 openfont.library/OF_OpenCache
 openfont.library/OF_OpenFaceA
 openfont.library/OF_RasterGlyph
+openfont.library/OF_RasterGlyphMatrix
 openfont.library/OF_RescanFonts
 openfont.library/OF_SetSize
 openfont.library/OF_ShapeText
@@ -296,6 +298,25 @@ openfont.library/OF_GetFaceInfo                 openfont.library/OF_GetFaceInfo
 	many faces its file holds, and the ascender, descender and line
 	height at the face's current pixel size.
 
+openfont.library/OF_GlyphAdvance                 openfont.library/OF_GlyphAdvance
+
+   NAME
+	OF_GlyphAdvance -- a glyph's advance in font units (V1, revision 1)
+
+   SYNOPSIS
+	advance = OF_GlyphAdvance(face, glyph)
+	D0                        A0    D0
+
+	LONG OF_GlyphAdvance(struct OFFace *, ULONG);
+
+   FUNCTION
+	The glyph's horizontal advance as the font gives it (hmtx), in
+	font units: OFFaceInfo's fi_UnitsPerEm to the em. Not scaled, not
+	shaped.
+
+   RESULT
+	advance - or -1 for a glyph the face doesn't have.
+
 openfont.library/OF_GetFallback                 openfont.library/OF_GetFallback
 
    NAME
@@ -394,6 +415,38 @@ openfont.library/OF_RasterGlyph                 openfont.library/OF_RasterGlyph
 	(0 clear, 255 solid), into a buffer the library allocates. Free it
 	with OF_FreeBitmap. An empty glyph (a space) gives a 0 by 0 bitmap
 	with bm_Pixels NULL, and its advance.
+
+openfont.library/OF_RasterGlyphMatrix     openfont.library/OF_RasterGlyphMatrix
+
+   NAME
+	OF_RasterGlyphMatrix -- a glyph's coverage through a matrix (V1, revision 1)
+
+   SYNOPSIS
+	error = OF_RasterGlyphMatrix(face, glyph, matrix, bitmap)
+	D0                           A0    D0     A1      A2
+
+	LONG OF_RasterGlyphMatrix(struct OFFace *, ULONG, const LONG *,
+	                          struct OFBitmap *);
+
+   FUNCTION
+	Draws glyph as OF_RasterGlyph does, through matrix: four LONGs,
+	16.16 pixels to the em, y up. A point (x, y) of the outline in font
+	units lands at
+	    X = (x * matrix[0] + y * matrix[1]) / units per em
+	    Y = (x * matrix[2] + y * matrix[3]) / units per em
+	pixels from the origin, so {size, 0, 0, size} (each << 16) is a
+	size in pixels, a different matrix[0] stretches the glyph across,
+	matrix[1] shears it and the four together rotate it. The face's own
+	pixel size is not used or changed. bm_XAdvance is the advance's x
+	through the matrix. Free the bitmap with OF_FreeBitmap.
+
+	For engines that make their own transforms, such as bullet.library.
+	Check lib_Revision 1 or later before calling it.
+
+   RESULT
+	error - 0, or OFERR_ARGUMENT for an entry beyond 1024 pixels to the
+	        em either way, OFERR_RANGE for a glyph over 16384 pixels
+	        either way, OFERR_FONT, OFERR_MEMORY.
 
 openfont.library/OF_RescanFonts                 openfont.library/OF_RescanFonts
 

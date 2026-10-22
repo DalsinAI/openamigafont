@@ -122,6 +122,34 @@ void of_path_scale(OFPath *p, uint32_t units_per_em, uint32_t ppem)
     }
 }
 
+/* floor(n / d + 1/2), d > 0 */
+static int64_t round_div(int64_t n, int64_t d)
+{
+    int64_t q = (2 * n + d) / (2 * d);
+    if ((2 * n + d) % (2 * d) != 0 && (2 * n + d) < 0)
+        q--;
+    return q;
+}
+
+int of_path_transform(OFPath *p, uint32_t units_per_em, const int32_t m[4])
+{
+    uint32_t i;
+    const int64_t lim = (int64_t)1024 << 16, d = (int64_t)units_per_em << 26;
+    for (i = 0; i < 4; ++i)
+        if (m[i] > lim || m[i] < -lim)
+            return OF_ERR_ARGUMENT;
+    if (!units_per_em)
+        return OF_ERR_ARGUMENT;
+    for (i = 0; i < p->npoints; ++i) {
+        const int64_t x = p->x[i], y = p->y[i];
+        int64_t X = round_div(x * m[0] + y * m[1], d), Y = round_div(x * m[2] + y * m[3], d);
+        const int64_t c = (int64_t)1 << 29;
+        p->x[i] = (int32_t)(X > c ? c : X < -c ? -c : X);
+        p->y[i] = (int32_t)(Y > c ? c : Y < -c ? -c : Y);
+    }
+    return OF_OK;
+}
+
 /* ---- the container ---- */
 
 static int in_file(const OFFont *f, uint32_t off, uint32_t len)
@@ -960,6 +988,14 @@ int of_font_outline_px(const OFFont *f, uint32_t glyph, uint32_t ppem, OFPath *p
 }
 
 /* ---- metrics ---- */
+
+uint32_t of_font_advance_units(const OFFont *f, uint32_t glyph)
+{
+    uint32_t adv;
+    int32_t lsb;
+    of_font_hmetrics(f, metrics_glyph(f, glyph), &adv, &lsb);
+    return adv;
+}
 
 int32_t of_font_advance_px(const OFFont *f, uint32_t glyph, uint32_t ppem)
 {

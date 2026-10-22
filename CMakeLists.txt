@@ -41,6 +41,9 @@ target_link_libraries(test_openfont PRIVATE openfont)
 add_executable(test_cache tests/test_cache.c)
 target_link_libraries(test_cache PRIVATE openfont)
 
+add_executable(test_matrix tests/test_matrix.c)
+target_link_libraries(test_matrix PRIVATE openfont)
+
 add_executable(test_range tests/test_range.c)
 target_include_directories(test_range PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(test_range PRIVATE openfont)
@@ -59,6 +62,7 @@ if(OPENFONT_TEST_FONT)
     add_test(NAME openfont_cache_roundtrip
              COMMAND test_cache ${OPENFONT_TEST_FONT}
                      ${CMAKE_CURRENT_BINARY_DIR}/roundtrip.ofc)
+    add_test(NAME openfont_matrix COMMAND test_matrix ${OPENFONT_TEST_FONT})
 endif()
 add_test(NAME openfont_range COMMAND test_range)
 

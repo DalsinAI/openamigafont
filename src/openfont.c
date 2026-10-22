@@ -717,6 +717,44 @@ int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out)
     return OF_OK;
 }
 
+int of_raster_glyph_matrix_a8(OFFace *face, uint32_t glyph_id, const int32_t m[4], OFBitmap *out)
+{
+    int rc;
+    int32_t left, top;
+    int64_t adv;
+    if (!face || !m || !out)
+        return OF_ERR_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    if (glyph_id >= face->font.num_glyphs)
+        return OF_ERR_FONT;
+    of_path_reset(&face->path);
+    rc = of_font_outline(&face->font, glyph_id, &face->path);
+    if (rc != OF_OK)
+        return rc;
+    if (face->path.failed)
+        return OF_ERR_MEMORY;
+    rc = of_path_transform(&face->path, face->font.units_per_em, m);
+    if (rc != OF_OK)
+        return rc;
+    rc = of_raster_a8(&face->path, &out->width, &out->height, &left, &top, &out->pixels);
+    if (rc != OF_OK)
+        return rc;
+    out->left = left;
+    out->top = top;
+    out->stride = out->width;
+    adv = (int64_t)of_font_advance_units(&face->font, glyph_id) * m[0];
+    /* font units * 16.16 pixels to the em / units per em = 16.16 pixels; to 26.6 */
+    out->advance_x_26_6 = (int32_t)(adv / ((int64_t)face->font.units_per_em << 10));
+    return OF_OK;
+}
+
+int32_t of_face_glyph_advance(OFFace *face, uint32_t glyph_id)
+{
+    if (!face || glyph_id >= face->font.num_glyphs)
+        return -1;
+    return (int32_t)of_font_advance_units(&face->font, glyph_id);
+}
+
 /* The file and the face in it: two faces of one collection differ. Worked
  * out when a cache first asks, since it reads the whole file: a second on a
  * real 68040 for a large font, and most programs never need it. */

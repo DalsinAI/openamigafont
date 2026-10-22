@@ -1,4 +1,4 @@
-==id OpenFont openfont_lib.sfd 1.0
+==id OpenFont openfont_lib.sfd 1.1
 * openfont.library's calls: fonts, shaping, glyphs and the font index.
 * Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
 * Version 1 is a preview: its calls may still change. They are frozen from
@@ -37,4 +37,8 @@ LONG OF_CacheGetGlyph(struct OFCache * cache, ULONG pixels, ULONG codepoint, str
 LONG OF_CacheMatchesFace(struct OFCache * cache, struct OFFace * face) (a0,a1)
 CONST_STRPTR OF_ErrorString(LONG code) (d0)
 LONG OF_RescanFonts() ()
+* revision 1 (openfont.library 1.1): for engines with their own transforms,
+* such as bullet.library
+LONG OF_RasterGlyphMatrix(struct OFFace * face, ULONG glyph, CONST LONG * matrix, struct OFBitmap * bitmap) (a0,d0,a1,a2)
+LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph) (a0,d0)
 ==end

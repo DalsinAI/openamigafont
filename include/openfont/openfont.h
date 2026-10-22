@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define OF_VERSION_MAJOR 0
-#define OF_VERSION_MINOR 4
+#define OF_VERSION_MINOR 5
 #define OF_VERSION_PATCH 0
 
 /* Glyphs in one of_cache_fill_range call before the OpenMulticore path is worth it.
@@ -150,6 +150,15 @@ size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes);
 
 int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out);
+/* The same through a 2 x 2 matrix m of 16.16 pixels to the em, y up
+ * (of_path_transform in src/of_font.h): {size, 0, 0, size} draws the glyph
+ * as of_raster_glyph_a8 does at that size, the other entries stretch,
+ * shear or rotate it. The face's own pixel size is not used or changed.
+ * out's advance_x_26_6 is the advance's x through m. For engines with
+ * their own transforms, such as bullet.library's. */
+int of_raster_glyph_matrix_a8(OFFace *face, uint32_t glyph_id, const int32_t m[4], OFBitmap *out);
+/* A glyph's advance in font units; -1 for a glyph the face doesn't have. */
+int32_t of_face_glyph_advance(OFFace *face, uint32_t glyph_id);
 void of_bitmap_release(OFBitmap *bitmap);
 
 uint64_t of_face_source_fingerprint(const OFFace *face);
