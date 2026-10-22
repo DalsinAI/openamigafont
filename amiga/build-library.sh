@@ -107,15 +107,28 @@ bad=$("$NM" "$OBJ/of_diskfont_core.o" "$OBJ/of_bullet_core.o" | awk '{print $NF}
 "$CC" $COMMON $NDKFLAGS $LIBFLAGS -fno-toplevel-reorder -fno-function-sections -fno-data-sections -c "$ROOT/library/openfont_lib.c" -o "$OBJ/aa_openfont_lib.o"
 
 # ---- linking: no C startup; libnix only for its stateless functions ----
+# The maths (floor, ceilf, atanf...) come from the libm next to the C
+# library, which does them on the FPU. libnix's -lm calls the
+# mathieee*.library functions through bases only a program's startup opens:
+# in a library they stay NULL, and the first call jumps into nowhere.
+LIBM=$(dirname "$("$CC" $CPU -print-file-name=libc.a)")/libm.a
+[ -f "$LIBM" ] || { echo "no FPU libm next to libc.a: $LIBM" >&2; exit 1; }
 "$CC" $CPU -nostartfiles -Wl,--gc-sections -Wl,-Map,"$OUT/openfont.library.map" \
     -o "$OUT/openfont.library" \
     "$OBJ/aa_openfont_lib.o" "$OBJ"/of_*.o "$OBJ/harfbuzz.o" \
-    -lc -lm -lgcc
+    -lc "$LIBM" -lgcc
 "$NM" -u "$OUT/openfont.library" > "$OUT/undefined.txt" || true
 # the first code in the file must be start(), which returns at once when
 # the library is run as a program
 if [ "$("$NM" "$OUT/openfont.library" | awk '$3 == "_start" {print $1}')" != 00000000 ]; then
     echo "start() is not at the beginning of the code" >&2
+    exit 1
+fi
+# no OS library base may come from libstubs, and no C library state from
+# _impure_ptr: only a program's startup sets either up
+if grep -Eq 'libstubs\.a\(|\(_impure_ptr\)' "$OUT/openfont.library.map"; then
+    echo "the library uses what only a program's startup sets up:" >&2
+    grep -E -B1 'libstubs\.a\(|\(_impure_ptr\)' "$OUT/openfont.library.map" >&2
     exit 1
 fi
 if [ -s "$OUT/undefined.txt" ]; then

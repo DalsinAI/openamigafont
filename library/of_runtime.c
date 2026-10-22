@@ -89,6 +89,22 @@ void *realloc(void *ptr, size_t n)
     return np;
 }
 
+/* expf and hypotf without the C library's wrappers: those set errno
+ * through _impure_ptr, which only a program's startup sets up (with its
+ * stdio). The FPU libm's own __ieee754 functions keep no state. */
+float __ieee754_expf(float);
+float __ieee754_hypotf(float, float);
+
+float expf(float x)
+{
+    return __ieee754_expf(x);
+}
+
+float hypotf(float x, float y)
+{
+    return __ieee754_hypotf(x, y);
+}
+
 /* HarfBuzz is C++ with no exceptions and no virtual calls left pure; these
  * are what its objects can still name. */
 void __cxa_pure_virtual(void)
