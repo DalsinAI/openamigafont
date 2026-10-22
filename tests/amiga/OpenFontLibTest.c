@@ -102,7 +102,7 @@ int main(void)
         return 20;
     }
     printf("     openfont.library %u.%u, OpenFont %lu.%lu\n", OpenFontBase->lib_Version,
-           OpenFontBase->lib_Revision, OF_Version() >> 16, OF_Version() & 0xFFFF);
+           OpenFontBase->lib_Revision, (unsigned long)(OF_Version() >> 16), (unsigned long)(OF_Version() & 0xFFFF));
     check(sizeof(struct OFGlyph) == 28 && sizeof(struct OFBitmap) == 28 && sizeof(struct OFFaceInfo) == 176,
           "structure sizes match the library's");
 
@@ -112,7 +112,7 @@ int main(void)
     if (face) {
         check(OF_GetFaceInfo(face, &info) == OFERR_OK, "OF_GetFaceInfo");
         printf("     %s %s, weight %u, %lu glyphs, ascender %ld\n", info.fi_Family, info.fi_Style,
-               info.fi_Weight, info.fi_NumGlyphs, info.fi_Ascender);
+               info.fi_Weight, (unsigned long)info.fi_NumGlyphs, (long)info.fi_Ascender);
         check(!strcmp(info.fi_Family, "DejaVu Sans") && info.fi_Weight == 400 &&
               (info.fi_Flags & OFFF_SCALABLE) && info.fi_PixelSize == 16, "the face's information");
 
@@ -129,8 +129,9 @@ int main(void)
         check(OF_RasterGlyph(face, glyphs[0].gl_Glyph, &bm) == OFERR_OK && bm.bm_Pixels, "OF_RasterGlyph");
         if (bm.bm_Pixels)
             hash = hash_bytes(hash, bm.bm_Pixels, bm.bm_Width * bm.bm_Height);
-        printf("     glyphs=%lu advance=%ld first=%lu bitmap=%lux%lu hash=%08lx\n", n, advance,
-               glyphs[0].gl_Glyph, bm.bm_Width, bm.bm_Height, hash);
+        printf("     glyphs=%lu advance=%ld first=%lu bitmap=%lux%lu hash=%08lx\n", (unsigned long)n, (long)advance,
+               (unsigned long)glyphs[0].gl_Glyph, (unsigned long)bm.bm_Width,
+               (unsigned long)bm.bm_Height, (unsigned long)hash);
         check(hash == EXPECT_HASH, "shaping and pixels match the host byte for byte");
         OF_FreeBitmap(&bm);
         check(OF_CharIndex(face, 'A') != 0 && OF_CharIndex(face, 0x10FFFD) == 0, "OF_CharIndex");

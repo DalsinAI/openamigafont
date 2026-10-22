@@ -17,6 +17,16 @@
  * - it patches nothing.
  *
  * Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE). */
+/* The first code in the file, ahead of the OS headers: built with
+ * -fno-toplevel-reorder, every function is emitted in the order it is
+ * defined, and OpenNDK's inline headers define out-of-line varargs helpers
+ * (AllocDosObjectTags() and the like). */
+int start(void);
+int start(void)
+{
+    return -1;                      /* run as a program, it does nothing */
+}
+
 #include <exec/types.h>
 #include <exec/resident.h>
 #include <exec/libraries.h>
@@ -81,13 +91,7 @@ struct OpenFontBase {
 
 struct ExecBase *SysBase;
 struct DosLibrary *DOSBase;
-struct UtilityBase *UtilityBase;
-
-int start(void);
-int start(void)
-{
-    return -1;                      /* run as a program, it does nothing */
-}
+struct Library *UtilityBase;       /* as proto/utility.h declares it */
 
 static const char lib_name[] = "openfont.library";
 static const char lib_id[] = "openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team\r\n";static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team";
@@ -701,7 +705,7 @@ static void lib_free(struct OpenFontBase *b)
         FreeMem(b->stack, STACK_SIZE);
     b->stack = NULL;
     if (UtilityBase)
-        CloseLibrary((struct Library *)UtilityBase);
+        CloseLibrary(UtilityBase);
     UtilityBase = NULL;
     if (DOSBase)
         CloseLibrary((struct Library *)DOSBase);
@@ -727,7 +731,7 @@ static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR se
     if ((sys->AttnFlags & (AFF_68040 | AFF_FPU40)) != (AFF_68040 | AFF_FPU40))
         goto fail;
     DOSBase = (struct DosLibrary *)OpenLibrary((CONST_STRPTR)"dos.library", 39);
-    UtilityBase = (struct UtilityBase *)OpenLibrary((CONST_STRPTR)"utility.library", 39);
+    UtilityBase = OpenLibrary((CONST_STRPTR)"utility.library", 39);
     b->stack = AllocMem(STACK_SIZE, MEMF_ANY);
     if (!DOSBase || !UtilityBase || !b->stack || !of_runtime_init())
         goto fail;

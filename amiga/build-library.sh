@@ -85,9 +85,11 @@ OFFLAGS="-std=gnu99 -Wall -Wextra -Werror -I$ROOT/include -I$ROOT/src -I$ROOT/li
 for f in src/openfont src/of_font src/of_cff src/of_raster src/openfont_cache src/openfont_index src/openfont_io_join; do
     "$CC" $COMMON $NDKFLAGS $OFFLAGS -c "$ROOT/$f.c" -o "$OBJ/of_$(basename "$f").o"
 done
-# The library's own files include the OS headers, whose struct timeval is
-# timer.device's: libnix's own is then left out.
-LIBFLAGS="$OFFLAGS -D_TIMEVAL_DEFINED"
+# The library's own files include the OS headers. devices/timer.h defines
+# struct timeval itself and sets _TIMEVAL_DEFINED, the guard libnix's
+# sys/_timeval.h shares, so whichever comes first defines it; defining the
+# guard here would leave struct timerequest with no struct timeval at all.
+LIBFLAGS="$OFFLAGS"
 for f in library/of_runtime library/of_stack library/of_io_dos; do
     "$CC" $COMMON $NDKFLAGS $LIBFLAGS -c "$ROOT/$f.c" -o "$OBJ/of_$(basename "$f").o"
 done
@@ -119,7 +121,7 @@ cp "$ROOT/LICENSE" "$OUT/licences/OpenFont.txt"
 cp "$HB/COPYING" "$OUT/licences/HarfBuzz.txt"
 
 # ---- the SDK's link library (the varargs calls), and the lab test ----
-SDKFLAGS="$CPU -O2 -Wall -Wextra -Werror -fno-delete-null-pointer-checks $NDKFLAGS -I$ROOT/sdk/Include_H -D_TIMEVAL_DEFINED"
+SDKFLAGS="$CPU -O2 -Wall -Wextra -Werror -fno-delete-null-pointer-checks $NDKFLAGS -I$ROOT/sdk/Include_H"
 STUBS=$WORK/stubs
 rm -rf "$STUBS"; mkdir -p "$STUBS"
 for f in "$ROOT"/sdk/stubs/*.c; do
