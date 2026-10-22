@@ -9,7 +9,7 @@ OpenFont reads and draws fonts with its own code, written from the published
 specifications; HarfBuzz still shapes inside it until OpenFont's own shaper
 replaces it.
 
-Current phase: **the resident library, a preview**. `openfont.library` 1.1 is
+Current phase: **the resident library, a preview**. `openfont.library` 1.2 is
 OpenFont for AmigaOS 3.2 on the 68040, with its own font reader and
 rasteriser and HarfBuzz 14.5.1 inside it. It finds fonts by family through its own font index, and a
 face falls back to others for the characters it has no glyphs for. Its calls
@@ -249,6 +249,19 @@ draws diskfont.library's outline fonts through OpenFont:
 stretch, a shear, a rotation) and `OF_GlyphAdvance` gives its advance in font
 units. Check `lib_Revision` before calling them.
 
+Revision 2 (1.2) adds `OF_OpenTextFont`: the Open apps' Amiga fonts, so they
+never open diskfont.library or bullet.library. It gives the `TextFont` that
+diskfont's `OpenDiskFont` would for the same `TextAttr`: from memory or
+`FONTS:`, matched, scaled, and an outline font (an `.otag` beside its
+`.font`) drawn at the size by OpenFont itself; close it with graphics'
+`CloseFont`. The work is AmigaChrome's OpenDiskFont and OpenBullet cores
+(amigachrome-guest `libraries/opendiskfont` and `libraries/openbullet`),
+copied unchanged into [library/textfont](library/textfont), with their env in
+[library/of_textfont.c](library/of_textfont.c): exec, dos and graphics for
+the first, OpenFont's own functions for the second, inside this library. It
+adds 25,580 bytes (1,028,488 to 1,054,068). Check `lib_Revision` against
+`OPENFONT_REVISION_TEXTFONT` (2) before calling it.
+
 ### Building it
 
 [amiga/build-library.sh](amiga/build-library.sh) builds it with OpenAmigaGCC
@@ -275,7 +288,7 @@ is the same build for a Cradle stove, which sets `STOVE` and `OUT`.
 Copy `openfont.library` to `LIBS:`, then, from a shell with a 4 KB stack:
 
 ```text
-OpenFontLibTest FONT/A,FONTDIR/A,CACHE
+OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K
 ```
 
 `FONT` is `DejaVuSans.ttf`, `FONTDIR` a folder with the DejaVu and Liberation
@@ -283,7 +296,9 @@ fonts, and `CACHE` an `.ofc` made from `FONT` on the host. It shapes and
 rasterises `FONT` at 16 pixels and expects the host's glyphs, advance and
 pixels byte for byte (the host's `test_openfont` prints the same hash), then checks the
 index, the aliases, the snowman from a fallback and `OFERR_NOTPROCESS` from a
-plain task. It ends with `OPENFONTLIB PASS`. It has not yet passed on a lab:
+plain task, then `OF_OpenTextFont` on topaz at 8, 11 and 23 (scaled), and on
+`OUTLINE` (an outline `.font` in `FONTS:` whose `.otag` names a TrueType or
+OpenType file) at 29. It ends with `OPENFONTLIB PASS`. It has not yet passed on a lab:
 on lab t4-a (17 Oct 2026) it stops before its first line of output, with this
 library and with the FreeType one before it alike.
 

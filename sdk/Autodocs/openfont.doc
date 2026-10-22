@@ -17,6 +17,7 @@ openfont.library/OF_GetFallback
 openfont.library/OF_MeasureText
 openfont.library/OF_OpenCache
 openfont.library/OF_OpenFaceA
+openfont.library/OF_OpenTextFont
 openfont.library/OF_RasterGlyph
 openfont.library/OF_RasterGlyphMatrix
 openfont.library/OF_RescanFonts
@@ -398,6 +399,40 @@ openfont.library/OF_OpenFaceA                     openfont.library/OF_OpenFaceA
 
    RESULT
 	face - or NULL.
+
+openfont.library/OF_OpenTextFont               openfont.library/OF_OpenTextFont
+
+   NAME
+	OF_OpenTextFont -- an Amiga font as a TextFont (V1, revision 2)
+
+   SYNOPSIS
+	font = OF_OpenTextFont(textAttr)
+	D0                     A0
+
+	struct TextFont *OF_OpenTextFont(CONST struct TextAttr *);
+
+   FUNCTION
+	What diskfont.library's OpenDiskFont does, without diskfont.library
+	or bullet.library: the font named in textAttr (a TTextAttr too),
+	from memory or from FONTS: (or the name's own directory when it has
+	a path), matched, and scaled to the size asked for unless
+	FPF_DESIGNED is set. An outline font (an .otag beside its .font) is
+	drawn at the size by openfont.library itself, characters 32 to 255,
+	at the TTextAttr's TA_DeviceDPI, else 72 dpi. A font loaded here
+	joins the system's font list, as OpenDiskFont's do, so graphics'
+	OpenFont finds it next time.
+
+	Only a process can call it (it reads files).
+
+   RESULT
+	font - the TextFont, to be closed with graphics.library's CloseFont,
+	or NULL when there is none (or the caller is not a process).
+
+   NOTES
+	Programs that used OpenDiskFont call this instead: open
+	openfont.library version 1 and check lib_Revision is 2 or more.
+	Fonts nobody has open are freed when the library is expunged; the
+	library stays while one of its fonts is in use.
 
 openfont.library/OF_RasterGlyph                 openfont.library/OF_RasterGlyph
 

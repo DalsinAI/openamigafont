@@ -25,4 +25,5 @@ OF_ErrorString(code)(d0)
 OF_RescanFonts()()
 OF_RasterGlyphMatrix(face,glyph,matrix,bitmap)(a0,d0,a1,a2)
 OF_GlyphAdvance(face,glyph)(a0,d0)
+OF_OpenTextFont(textAttr)(a0)
 ##end

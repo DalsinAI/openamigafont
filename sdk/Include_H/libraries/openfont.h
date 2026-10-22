@@ -19,6 +19,7 @@
 
 #define OPENFONTNAME "openfont.library"
 #define OPENFONT_VERSION 1
+#define OPENFONT_REVISION_TEXTFONT 2   /* lib_Revision with OF_OpenTextFont */
 
 /* A face (one font of a file) and a compiled glyph cache: opaque. */
 struct OFFace;

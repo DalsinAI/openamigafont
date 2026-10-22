@@ -430,4 +430,21 @@ __openfont_OF_GlyphAdvance(void *__base, struct OFFace * face, ULONG glyph)
 #define OF_GlyphAdvance(face, glyph) __openfont_OF_GlyphAdvance((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph))
 #define __OF_GlyphAdvance_base(__in_base, face, glyph) __openfont_OF_GlyphAdvance((__in_base), (struct OFFace *)(face), (ULONG)(glyph))
 
+static __inline__ struct TextFont *
+__openfont_OF_OpenTextFont(void *__base, CONST struct TextAttr * textAttr)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(textAttr);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d0 __asm("d0");
+	register ULONG _d1 __asm("d1");
+	register ULONG _a1 __asm("a1");
+	__asm__ __volatile__ ("jsr -162(%/a6)"
+		: "=r" (_d0), "=r" (_d1), "+r" (_a0), "=r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (struct TextFont *)_d0;
+}
+#define OF_OpenTextFont(textAttr) __openfont_OF_OpenTextFont((OPENFONT_BASE_NAME), (CONST struct TextAttr *)(textAttr))
+#define __OF_OpenTextFont_base(__in_base, textAttr) __openfont_OF_OpenTextFont((__in_base), (CONST struct TextAttr *)(textAttr))
+
 #endif /* INLINE_OPENFONT_H */

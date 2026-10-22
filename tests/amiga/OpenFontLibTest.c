@@ -1,6 +1,6 @@
 /* OpenFontLibTest: openfont.library's calls on AmigaOS 3.2, for a lab.
  *
- *   OpenFontLibTest FONT/A,FONTDIR/A,CACHE
+ *   OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K
  *
  * FONT is DejaVuSans.ttf: the shaping and raster hash must be the one the
  * host's tests/test_openfont.c prints for it at 16 pixels (EXPECT below),
@@ -8,6 +8,9 @@
  * HarfBuzz 14.5.1. FONTDIR holds DejaVu
  * and Liberation, for the index, the aliases and fallback. CACHE is an
  * .ofc file openfontcompile made on the host from FONT (sizes 9 12 16 24).
+ * OUTLINE is an outline .font in FONTS: whose .otag names a TrueType or
+ * OpenType file (OT_Spec1), for OF_OpenTextFont at a size it has no bitmap
+ * for; without it only bitmap fonts are opened (topaz.font).
  *
  * Start it with a 4 KB stack: the library works on its own.
  *
@@ -20,6 +23,8 @@
 #include <dos/dos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/graphics.h>
+#include <graphics/text.h>
 #include <libraries/openfont.h>
 #include <proto/openfont.h>
 
@@ -32,6 +37,7 @@
 #define EXPECT_HASH 0x3a37fb49UL
 
 struct Library *OpenFontBase;
+struct GfxBase *GfxBase;
 static int fails;
 
 static void check(int ok, const char *what)
@@ -80,7 +86,7 @@ int main(void)
 {
     static const char text[] = "Office AVWa fi \xC3\xA9";
     static const char snow[] = "snow \xE2\x98\x83!";
-    LONG args[3] = { 0, 0, 0 };
+    LONG args[4] = { 0, 0, 0, 0 };
     struct RDArgs *rda;
     struct OFFace *face, *found;
     struct OFFaceInfo info;
@@ -89,9 +95,9 @@ int main(void)
     ULONG n, i, hash = 2166136261UL;
     LONG advance, err;
 
-    rda = ReadArgs((CONST_STRPTR)"FONT/A,FONTDIR/A,CACHE", args, NULL);
+    rda = ReadArgs((CONST_STRPTR)"FONT/A,FONTDIR/A,CACHE,OUTLINE/K", args, NULL);
     if (!rda) {
-        printf("usage: OpenFontLibTest FONT/A,FONTDIR/A,CACHE\n");
+        printf("usage: OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K\n");
         return 20;
     }
     OpenFontBase = OpenLibrary((CONST_STRPTR)"openfont.library", 1);
@@ -212,6 +218,40 @@ int main(void)
             FreeMem(stack, 4096);
     }
     check(!strcmp((const char *)OF_ErrorString(OFERR_FONT), "font error"), "OF_ErrorString");
+
+    /* Amiga fonts as TextFonts, without diskfont.library */
+    check(OpenFontBase->lib_Revision >= OPENFONT_REVISION_TEXTFONT, "openfont.library 1.2: OF_OpenTextFont");
+    GfxBase = (struct GfxBase *)OpenLibrary((CONST_STRPTR)"graphics.library", 39);
+    if (GfxBase && OpenFontBase->lib_Revision >= OPENFONT_REVISION_TEXTFONT) {
+        struct TextAttr ta = { (STRPTR)"topaz.font", 8, 0, 0 };
+        struct TextFont *tf = OF_OpenTextFont(&ta);
+        check(tf != NULL && tf->tf_YSize == 8, "OF_OpenTextFont(topaz 8)");
+        if (tf) CloseFont(tf);
+        ta.ta_YSize = 11;
+        tf = OF_OpenTextFont(&ta);
+        check(tf != NULL && tf->tf_YSize == 11, "OF_OpenTextFont(topaz 11), from FONTS:");
+        if (tf) CloseFont(tf);
+        ta.ta_YSize = 23;
+        tf = OF_OpenTextFont(&ta);
+        check(tf != NULL && tf->tf_YSize == 23, "OF_OpenTextFont(topaz 23), scaled");
+        if (tf) CloseFont(tf);
+        ta.ta_Name = (STRPTR)"no such.font";
+        ta.ta_YSize = 8;
+        check(OF_OpenTextFont(&ta) == NULL, "OF_OpenTextFont: no such font");
+        if (args[3]) {
+            ta.ta_Name = (STRPTR)args[3];
+            ta.ta_YSize = 29;
+            tf = OF_OpenTextFont(&ta);
+            check(tf != NULL && tf->tf_YSize == 29 && tf->tf_CharLoc &&
+                  ((ULONG *)tf->tf_CharLoc)['A' - tf->tf_LoChar] & 0xFFFF,
+                  "OF_OpenTextFont: an outline font drawn at 29");
+            if (tf) {
+                printf("     %s 29: baseline %u, XSize %u\n", (char *)args[3], tf->tf_Baseline, tf->tf_XSize);
+                CloseFont(tf);
+            }
+        }
+    }
+    if (GfxBase) CloseLibrary((struct Library *)GfxBase);
 
     CloseLibrary(OpenFontBase);
     FreeArgs(rda);

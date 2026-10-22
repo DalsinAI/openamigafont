@@ -90,9 +90,19 @@ done
 # sys/_timeval.h shares, so whichever comes first defines it; defining the
 # guard here would leave struct timerequest with no struct timeval at all.
 LIBFLAGS="$OFFLAGS"
-for f in library/of_runtime library/of_stack library/of_io_dos; do
+for f in library/of_runtime library/of_stack library/of_io_dos library/of_textfont; do
     "$CC" $COMMON $NDKFLAGS $LIBFLAGS -c "$ROOT/$f.c" -o "$OBJ/of_$(basename "$f").o"
 done
+# OF_OpenTextFont's two cores (library/textfont, from amigachrome-guest's
+# OpenDiskFont and OpenBullet): lean C++, library profile, integer only
+LEAN="-std=gnu++23 -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -nostdlib++ -fno-builtin -fno-tree-loop-distribute-patterns -Wall -Wextra -Werror -Wno-unused-parameter"
+for f in diskfont_core bullet_core; do
+    "$CXX" $COMMON $LEAN -c "$ROOT/library/textfont/$f.cpp" -o "$OBJ/of_$f.o"
+done
+bad=$("$NM" "$OBJ/of_diskfont_core.o" "$OBJ/of_bullet_core.o" | awk '{print $NF}' |
+      grep -E '^(__cxa_|__gxx_personality|_ZTI|_ZTS|_ZTV|_GLOBAL__sub_I_|_ZGV|_Znw|_Zna|_ZdlPv|_ZdaPv)' || true)
+[ -z "$bad" ] || { echo "the textfont cores hold what the lean profile forbids: $bad" >&2; exit 1; }
 # the library's file first, its top level in order: the code starts with start()
 "$CC" $COMMON $NDKFLAGS $LIBFLAGS -fno-toplevel-reorder -fno-function-sections -fno-data-sections -c "$ROOT/library/openfont_lib.c" -o "$OBJ/aa_openfont_lib.o"
 
