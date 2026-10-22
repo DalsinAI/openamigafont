@@ -50,7 +50,7 @@ int start(void)
 #include "of_runtime.h"
 
 #define LIB_VERSION 1
-#define LIB_REVISION 0
+#define LIB_REVISION 1
 #define STACK_SIZE (64 * 1024)
 
 /* The same values as the SDK header's (sdk/Include_H/libraries/openfont.h) */
@@ -94,7 +94,7 @@ struct DosLibrary *DOSBase;
 struct Library *UtilityBase;       /* as proto/utility.h declares it */
 
 static const char lib_name[] = "openfont.library";
-static const char lib_id[] = "openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team\r\n";static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.0 (17.10.2026) OpenFont 0.4, AmigaChrome Team";
+static const char lib_id[] = "openfont.library 1.1 (22.10.2026) OpenFont 0.5, AmigaChrome Team\r\n";static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.1 (22.10.2026) OpenFont 0.5, AmigaChrome Team";
 
 #define REG(r, decl) register decl __asm(#r)
 #define BASE REG(a6, struct OpenFontBase *b)
@@ -347,6 +347,20 @@ static long w_raster(void *base, void *arg)
     return of_raster_glyph_a8(a->face, a->n, (OFBitmap *)a->out);
 }
 
+static long w_raster_matrix(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_raster_glyph_matrix_a8(a->face, a->n, (const int32_t *)a->utf8, (OFBitmap *)a->out);
+}
+
+static long w_glyph_advance(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_face_glyph_advance(a->face, a->n);
+}
+
 static long w_free_bitmap(void *base, void *arg)
 {
     (void)base;
@@ -520,6 +534,29 @@ static LONG L_RasterGlyph(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(a1, O
     return run(b, w_raster, &a);
 }
 
+static LONG L_RasterGlyphMatrix(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(a1, const LONG *matrix),
+                                REG(a2, OFBitmap *bitmap), BASE)
+{
+    struct FaceArgs a;
+    if (!face || !matrix || !bitmap)
+        return OF_ERR_ARGUMENT;
+    a.face = face;
+    a.n = glyph;
+    a.utf8 = (const char *)matrix;
+    a.out = bitmap;
+    return run(b, w_raster_matrix, &a);
+}
+
+static LONG L_GlyphAdvance(REG(a0, OFFace *face), REG(d0, ULONG glyph), BASE)
+{
+    struct FaceArgs a;
+    if (!face)
+        return -1;
+    a.face = face;
+    a.n = glyph;
+    return run(b, w_glyph_advance, &a);
+}
+
 static VOID L_FreeBitmap(REG(a0, OFBitmap *bitmap), BASE)
 {
     struct FaceArgs a;
@@ -675,6 +712,8 @@ static const APTR lib_vectors[] = {
     (APTR)L_CacheMatchesFace,   /* -132 */
     (APTR)L_ErrorString,        /* -138 */
     (APTR)L_RescanFonts,        /* -144 */
+    (APTR)L_RasterGlyphMatrix,  /* -150, revision 1 */
+    (APTR)L_GlyphAdvance,       /* -156, revision 1 */
     (APTR)-1
 };
 

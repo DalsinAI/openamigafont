@@ -31,5 +31,7 @@
 #pragma libcall OpenFontBase OF_CacheMatchesFace 84 9802
 #pragma libcall OpenFontBase OF_ErrorString 8a 001
 #pragma libcall OpenFontBase OF_RescanFonts 90 00
+#pragma libcall OpenFontBase OF_RasterGlyphMatrix 96 a90804
+#pragma libcall OpenFontBase OF_GlyphAdvance 9c 0802
 
 #endif /* PRAGMAS_OPENFONT_PRAGMAS_H */

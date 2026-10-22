@@ -24,5 +24,7 @@ _LVOOF_CacheGetGlyph	EQU	-126
 _LVOOF_CacheMatchesFace	EQU	-132
 _LVOOF_ErrorString	EQU	-138
 _LVOOF_RescanFonts	EQU	-144
+_LVOOF_RasterGlyphMatrix	EQU	-150
+_LVOOF_GlyphAdvance	EQU	-156
 
 	ENDC	; LVO_OPENFONT_LIB_I

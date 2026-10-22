@@ -9,7 +9,7 @@ OpenFont reads and draws fonts with its own code, written from the published
 specifications; HarfBuzz still shapes inside it until OpenFont's own shaper
 replaces it.
 
-Current phase: **the resident library, a preview**. `openfont.library` 1.0 is
+Current phase: **the resident library, a preview**. `openfont.library` 1.1 is
 OpenFont for AmigaOS 3.2 on the 68040, with its own font reader and
 rasteriser and HarfBuzz 14.5.1 inside it. It finds fonts by family through its own font index, and a
 face falls back to others for the characters it has no glyphs for. Its calls
@@ -241,6 +241,13 @@ CloseLibrary(OpenFontBase);
 ([sdk/Autodocs/openfont.doc](sdk/Autodocs/openfont.doc)). The varargs calls
 `OF_OpenFace` and `OF_FindFace` are in `libopenfont.a`, which the build makes
 from [sdk/stubs](sdk/stubs). Every call does its work on the library's stack.
+
+Revision 1 (1.1) adds two calls for engines that make their own transforms,
+such as our bullet.library (amigachrome-guest `libraries/openbullet`), which
+draws diskfont.library's outline fonts through OpenFont:
+`OF_RasterGlyphMatrix` draws a glyph through a 2 x 2 matrix (a size, a
+stretch, a shear, a rotation) and `OF_GlyphAdvance` gives its advance in font
+units. Check `lib_Revision` before calling them.
 
 ### Building it
 

@@ -44,6 +44,14 @@ void of_path_scale(OFPath *p, uint32_t units_per_em, uint32_t ppem);
 /* ppem * 64 / units_per_em, 16.16, rounded: font units to 26.6 */
 int32_t of_scale_16_16(uint32_t units_per_em, uint32_t ppem);
 
+/* x, y in 16.16 font units to 26.6 pixels through a 2 x 2 matrix m of
+ * 16.16 pixels to the em, y up: X = (x m[0] + y m[1]) / units_per_em,
+ * Y = (x m[2] + y m[3]) / units_per_em, each rounded half up. m = {ppem,
+ * 0, 0, ppem} (as 16.16) is of_path_scale's size; the other entries shear,
+ * rotate or stretch it. OF_ERR_ARGUMENT when an entry is beyond 1024
+ * pixels to the em either way, or units_per_em is 0. */
+int of_path_transform(OFPath *p, uint32_t units_per_em, const int32_t m[4]);
+
 /* ---- the rasteriser ---- */
 
 /* An A8 bitmap of a 26.6 outline, with non-zero winding: the outline's
@@ -122,6 +130,10 @@ int of_font_outline(const OFFont *f, uint32_t glyph, OFPath *path);
  * scaled as it is put together: each component's points, then its offset on
  * its own, its transform applied to the scaled points. */
 int of_font_outline_px(const OFFont *f, uint32_t glyph, uint32_t ppem, OFPath *path);
+
+/* A glyph's advance in font units, as hmtx gives it (a TrueType composite
+ * with USE_MY_METRICS: its component's). */
+uint32_t of_font_advance_units(const OFFont *f, uint32_t glyph);
 
 /* A glyph's advance in 26.6 pixels at ppem, not rounded to whole pixels. */
 int32_t of_font_advance_px(const OFFont *f, uint32_t glyph, uint32_t ppem);

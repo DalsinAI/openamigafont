@@ -37,6 +37,8 @@ LONG OF_CacheGetGlyph(struct OFCache * cache, ULONG pixels, ULONG codepoint, str
 LONG OF_CacheMatchesFace(struct OFCache * cache, struct OFFace * face);
 CONST_STRPTR OF_ErrorString(LONG code);
 LONG OF_RescanFonts(VOID);
+LONG OF_RasterGlyphMatrix(struct OFFace * face, ULONG glyph, CONST LONG * matrix, struct OFBitmap * bitmap);
+LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph);
 
 #ifdef __cplusplus
 }
