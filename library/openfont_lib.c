@@ -48,9 +48,10 @@ int start(void)
 #include "openfont_index.h"
 #include "openfont_io.h"
 #include "of_runtime.h"
+#include "of_textfont.h"
 
 #define LIB_VERSION 1
-#define LIB_REVISION 1
+#define LIB_REVISION 2
 #define STACK_SIZE (64 * 1024)
 
 /* The same values as the SDK header's (sdk/Include_H/libraries/openfont.h) */
@@ -87,6 +88,7 @@ struct OpenFontBase {
     OFContext *ctx;                 /* the core's context, made on first use */
     OFIndex index;
     int index_ready;                /* folders and settings read, index loaded */
+    struct OFTextFonts fonts;       /* the Amiga fonts OF_OpenTextFont loaded */
 };
 
 struct ExecBase *SysBase;
@@ -94,7 +96,8 @@ struct DosLibrary *DOSBase;
 struct Library *UtilityBase;       /* as proto/utility.h declares it */
 
 static const char lib_name[] = "openfont.library";
-static const char lib_id[] = "openfont.library 1.1 (22.10.2026) OpenFont 0.5, AmigaChrome Team\r\n";static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.1 (22.10.2026) OpenFont 0.5, AmigaChrome Team";
+static const char lib_id[] = "openfont.library 1.2 (22.10.2026) OpenFont 0.5, AmigaChrome Team\r\n";
+static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.2 (22.10.2026) OpenFont 0.5, AmigaChrome Team";
 
 #define REG(r, decl) register decl __asm(#r)
 #define BASE REG(a6, struct OpenFontBase *b)
@@ -445,6 +448,15 @@ static long w_cache_matches(void *base, void *arg)
     return of_cache_matches_face(a->cache, a->face) ? 1 : 0;
 }
 
+static long w_open_textfont(void *base, void *arg)
+{
+    struct OpenFontBase *b = (struct OpenFontBase *)base;
+    OFContext *ctx = context(b);
+    if (!ctx)
+        return 0;
+    return (long)of_textfont_open(&b->fonts, ctx, (const struct TextAttr *)arg);
+}
+
 /* ---- the library's vectors ---- */
 
 static ULONG L_Version(BASE)
@@ -682,6 +694,13 @@ static LONG L_RescanFonts(BASE)
     return run(b, w_rescan, NULL);
 }
 
+static struct TextFont *L_OpenTextFont(REG(a0, struct TextAttr *ta), BASE)
+{
+    if (!ta || !ta->ta_Name || !is_process())
+        return NULL;
+    return (struct TextFont *)run(b, w_open_textfont, ta);
+}
+
 /* ---- the library itself ---- */
 
 static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR seglist), REG(a6, struct ExecBase *sys));
@@ -714,6 +733,7 @@ static const APTR lib_vectors[] = {
     (APTR)L_RescanFonts,        /* -144 */
     (APTR)L_RasterGlyphMatrix,  /* -150, revision 1 */
     (APTR)L_GlyphAdvance,       /* -156, revision 1 */
+    (APTR)L_OpenTextFont,       /* -162, revision 2 */
     (APTR)-1
 };
 
@@ -743,6 +763,7 @@ static void lib_free(struct OpenFontBase *b)
     if (b->stack)
         FreeMem(b->stack, STACK_SIZE);
     b->stack = NULL;
+    of_textfont_cleanup();
     if (UtilityBase)
         CloseLibrary(UtilityBase);
     UtilityBase = NULL;
@@ -772,7 +793,7 @@ static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR se
     DOSBase = (struct DosLibrary *)OpenLibrary((CONST_STRPTR)"dos.library", 39);
     UtilityBase = OpenLibrary((CONST_STRPTR)"utility.library", 39);
     b->stack = AllocMem(STACK_SIZE, MEMF_ANY);
-    if (!DOSBase || !UtilityBase || !b->stack || !of_runtime_init())
+    if (!DOSBase || !UtilityBase || !b->stack || !of_runtime_init() || !of_textfont_setup(&b->fonts))
         goto fail;
     of_index_init(&b->index);
     return &b->lib;
@@ -799,7 +820,9 @@ static BPTR lib_close(BASE)
 static BPTR lib_expunge(BASE)
 {
     BPTR seglist;
-    if (b->lib.lib_OpenCnt) {
+    /* the fonts OF_OpenTextFont loaded go first; while one is still in use
+     * the library stays */
+    if (b->lib.lib_OpenCnt || !of_textfont_flush(&b->fonts)) {
         b->lib.lib_Flags |= LIBF_DELEXP;
         return 0;
     }

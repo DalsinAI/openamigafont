@@ -1,4 +1,4 @@
-==id OpenFont openfont_lib.sfd 1.1
+==id OpenFont openfont_lib.sfd 1.2
 * openfont.library's calls: fonts, shaping, glyphs and the font index.
 * Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
 * Version 1 is a preview: its calls may still change. They are frozen from
@@ -11,6 +11,7 @@
 ==public
 ==include <exec/types.h>
 ==include <utility/tagitem.h>
+==include <graphics/text.h>
 ==include <libraries/openfont.h>
 ==version 1
 ULONG OF_Version() ()
@@ -41,4 +42,7 @@ LONG OF_RescanFonts() ()
 * such as bullet.library
 LONG OF_RasterGlyphMatrix(struct OFFace * face, ULONG glyph, CONST LONG * matrix, struct OFBitmap * bitmap) (a0,d0,a1,a2)
 LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph) (a0,d0)
+* revision 2 (openfont.library 1.2): an Amiga font (FONTS:, bitmap or
+* outline) as a TextFont, as diskfont.library's OpenDiskFont gives one
+struct TextFont * OF_OpenTextFont(CONST struct TextAttr * textAttr) (a0)
 ==end

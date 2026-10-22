@@ -7,6 +7,7 @@
 
 #include <exec/types.h>
 #include <utility/tagitem.h>
+#include <graphics/text.h>
 #include <libraries/openfont.h>
 
 #ifdef __cplusplus
@@ -39,6 +40,7 @@ CONST_STRPTR OF_ErrorString(LONG code);
 LONG OF_RescanFonts(VOID);
 LONG OF_RasterGlyphMatrix(struct OFFace * face, ULONG glyph, CONST LONG * matrix, struct OFBitmap * bitmap);
 LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph);
+struct TextFont * OF_OpenTextFont(CONST struct TextAttr * textAttr);
 
 #ifdef __cplusplus
 }

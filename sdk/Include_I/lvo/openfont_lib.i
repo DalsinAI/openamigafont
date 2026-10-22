@@ -26,5 +26,6 @@ _LVOOF_ErrorString	EQU	-138
 _LVOOF_RescanFonts	EQU	-144
 _LVOOF_RasterGlyphMatrix	EQU	-150
 _LVOOF_GlyphAdvance	EQU	-156
+_LVOOF_OpenTextFont	EQU	-162
 
 	ENDC	; LVO_OPENFONT_LIB_I
