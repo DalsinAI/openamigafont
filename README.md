@@ -372,8 +372,11 @@ size asked, as ARGB pixels; `OF_FreeColorBitmap` frees them (-216 and
 newer): there is no PNG code in the library, and a program drawing emoji
 needs no libpng either. The core's `of_face_color_png` gives the PNG itself;
 the strike chosen and the image are HarfBuzz's for every glyph of Noto
-Color Emoji and of HarfBuzz's own CBDT and sbix test fonts. The library
-grows by 4,332 bytes (252,368 to 256,700). Check `lib_Revision` against
+Color Emoji and of HarfBuzz's own CBDT and sbix test fonts. A PNG datatype that reads only files is given the PNG through a
+file in T:, and after `OFERR_EXEC` the result's `cb_Left` names the step
+that failed (1 datatypes.library, 2 the picture object, 4 the pixel read)
+with `IoErr()` in `cb_Top`. The library grows by 4,976 bytes (252,368 to
+257,344). Check `lib_Revision` against
 `OPENFONT_REVISION_COLOR` (4) before calling them.
 
 ### Building it

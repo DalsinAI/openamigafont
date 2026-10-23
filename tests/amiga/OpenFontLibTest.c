@@ -337,6 +337,9 @@ int main(void)
                 printf("     U+1F600: rc %ld, %lux%lu, left %ld top %ld, strike %lu\n", (long)rc,
                        (unsigned long)cb.cb_Width, (unsigned long)cb.cb_Height, (long)cb.cb_Left,
                        (long)cb.cb_Top, (unsigned long)cb.cb_PPEM);
+                if (rc == OFERR_EXEC)
+                    printf("     the datatype path stopped at step %ld (1 datatypes.library, 2 the object, 4 the read), IoErr %ld\n",
+                           (long)cb.cb_Left, (long)cb.cb_Top);
                 check(rc == OFERR_OK && cb.cb_Pixels && cb.cb_Width && cb.cb_Height && cb.cb_PPEM,
                       "OF_GlyphColorBitmap(U+1F600) through the PNG datatype");
                 for (p = 0; rc == OFERR_OK && p < cb.cb_Width * cb.cb_Height; ++p) {
