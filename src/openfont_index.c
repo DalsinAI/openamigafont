@@ -680,3 +680,69 @@ OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
     }
     return face;
 }
+
+/* opens e and keeps it when it has a glyph for codepoint */
+static OFFace *open_if_has(OFContext *ctx, const OFIndexEntry *e, uint32_t codepoint)
+{
+    OFFace *face = of_face_open_index(ctx, e->path, e->face_index);
+    if (face && !of_face_char_index(face, codepoint)) {
+        of_face_close(face);
+        face = NULL;
+    }
+    return face;
+}
+
+OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint,
+                           uint16_t weight, int italic, int *error)
+{
+    const char *p, *end;
+    size_t i;
+    int dummy;
+    if (!error)
+        error = &dummy;
+    *error = OF_OK;
+    if (!ctx) {
+        *error = OF_ERR_ARGUMENT;
+        return NULL;
+    }
+    /* the default chain first, in its order */
+    p = ix->fallbacks;
+    end = p + strlen(p);
+    while (p < end) {
+        const char *f = p, *fe;
+        const OFIndexEntry *fb;
+        OFFace *face;
+        while (p < end && *p != ',')
+            ++p;
+        fe = p;
+        if (p < end)
+            ++p;
+        while (f < fe && *f == ' ')
+            ++f;
+        while (fe > f && fe[-1] == ' ')
+            --fe;
+        if (fe == f)
+            continue;
+        fb = best_of_family(ix, f, (size_t)(fe - f), weight, italic);
+        if (fb && (face = open_if_has(ctx, fb, codepoint)) != NULL)
+            return face;
+    }
+    /* then every face: the right slant and the nearest weight first */
+    for (i = 0; i < ix->count; ++i) {
+        const OFIndexEntry *e = &ix->entries[i];
+        const OFIndexEntry *best;
+        OFFace *face;
+        size_t k;
+        int seen = 0;
+        /* one face a family: its best for weight and slant */
+        for (k = 0; k < i && !seen; ++k)
+            seen = ci_eq(ix->entries[k].family, e->family);
+        if (seen)
+            continue;
+        best = best_of_family(ix, e->family, strlen(e->family), weight, italic);
+        if (best && (face = open_if_has(ctx, best, codepoint)) != NULL)
+            return face;
+    }
+    *error = OF_ERR_FONT;
+    return NULL;
+}

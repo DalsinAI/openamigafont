@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define OF_VERSION_MAJOR 0
-#define OF_VERSION_MINOR 5
+#define OF_VERSION_MINOR 6
 #define OF_VERSION_PATCH 0
 
 /* Glyphs in one of_cache_fill_range call before the OpenMulticore path is worth it.
@@ -148,6 +148,109 @@ OFFace *of_face_fallback(OFFace *face, uint32_t n);
 size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
                      OFGlyph *out, size_t capacity);
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes);
+
+/* An OpenType feature a program turns on or off ('liga' 0, 'smcp' 1,
+ * 'salt' 2 for the second alternate), over the text's [start, end): bytes
+ * for UTF-8, 16-bit units for UTF-16, counted from the start of the whole
+ * text. start 0 and end OF_FEATURE_END cover all of it. */
+#define OF_FEATURE_END 0xFFFFFFFFu
+typedef struct OFFeature {
+    uint32_t tag;
+    uint32_t value;
+    uint32_t start;
+    uint32_t end;
+} OFFeature;
+
+/* At most this many features in one call; more are ignored. A feature
+ * over part of the text counts towards OF_MAX_RANGED_FEATURES too. */
+#define OF_MAX_FEATURES 32
+#define OF_MAX_RANGED_FEATURES 24
+
+/* OFShapeOptions.direction */
+#define OF_DIR_AUTO 0               /* from the run's script */
+#define OF_DIR_LTR  1
+#define OF_DIR_RTL  2
+
+#define OF_MAKE_TAG(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
+
+/* How a run is shaped beyond its face. Zeroed, it is what of_shape_utf8
+ * does: the script and direction from the text, the script's default
+ * language system, the default features. */
+typedef struct OFShapeOptions {
+    uint32_t script;                /* ISO 15924 tag ('Latn', 'Arab'), 0: from the text */
+    uint32_t language;              /* OpenType language system tag ('TRK '), 0: the default */
+    uint32_t direction;             /* OF_DIR_* */
+    const OFFeature *features;
+    uint32_t num_features;
+} OFShapeOptions;
+
+/* Shapes text[off, off + len), the whole text as its context, with
+ * options (NULL: the defaults). Glyphs come in visual order, left to
+ * right: a right-to-left run's last character first. Each glyph's cluster
+ * is the offset of its cluster's first character in the whole text: bytes
+ * for of_shape, 16-bit units for of_shape_utf16 (a pair of surrogates is
+ * one character, a lone surrogate is U+FFFD). Writes up to capacity
+ * glyphs and returns how many the run has; 0 on failure. */
+size_t of_shape(OFFace *face, const char *utf8, size_t bytes, size_t off, size_t len,
+                const OFShapeOptions *options, OFGlyph *out, size_t capacity);
+size_t of_shape_utf16(OFFace *face, const uint16_t *text, size_t units, size_t off, size_t len,
+                      const OFShapeOptions *options, OFGlyph *out, size_t capacity);
+
+/* A face's measurements at its pixel size, 26.6 pixels, y up. */
+typedef struct OFFaceMetrics {
+    uint32_t units_per_em;
+    uint32_t pixel_size;
+    int32_t ascender;               /* the line's, as OFFaceInfo's */
+    int32_t descender;              /* negative below the baseline */
+    int32_t line_gap;
+    int32_t x_height;               /* OS/2, else measured from 'x'; 0 when neither */
+    int32_t cap_height;             /* OS/2, else measured from 'H'; 0 when neither */
+    int32_t underline_position;     /* post: the top of the underline, negative below */
+    int32_t underline_thickness;
+    int32_t strikeout_position;     /* OS/2, else 0 */
+    int32_t strikeout_thickness;
+    int32_t max_advance;            /* hhea advanceWidthMax */
+    int32_t space_advance;          /* U+0020's, 0 when it has none */
+    uint32_t flags;                 /* OF_FACE_* */
+} OFFaceMetrics;
+
+int of_face_metrics(OFFace *face, OFFaceMetrics *m);
+
+/* A glyph's horizontal advance at the face's pixel size, 26.6; -1 for a
+ * glyph the face doesn't have. */
+int32_t of_face_glyph_advance_px(OFFace *face, uint32_t glyph_id);
+
+/* A glyph's ink box at the face's pixel size, 26.6, y up: the box of its
+ * outline's points (of its bitmap for a face without outlines). */
+typedef struct OFGlyphExtents {
+    int32_t x_bearing;              /* from the pen to the box's left edge */
+    int32_t y_bearing;              /* from the baseline up to its top */
+    int32_t width;
+    int32_t height;                 /* positive: the box goes down from y_bearing */
+} OFGlyphExtents;
+
+int of_face_glyph_extents(OFFace *face, uint32_t glyph_id, OFGlyphExtents *e);
+
+/* A glyph's outline at the face's pixel size as verbs and points, 26.6,
+ * y up: OF_PATH_MOVE and OF_PATH_LINE take one point, OF_PATH_QUAD two
+ * (control, end), OF_PATH_CUBIC three, OF_PATH_CLOSE none. Each contour
+ * starts with a move and ends with a close. Writes what fits (points as
+ * x, y pairs: 2 int32_t each) and sets *nverbs and *npoints to the whole
+ * outline's; OF_ERR_BUFFER when it did not fit, so a call with no room
+ * measures. A space has no verbs. */
+#define OF_PATH_MOVE  0
+#define OF_PATH_LINE  1
+#define OF_PATH_QUAD  2
+#define OF_PATH_CUBIC 3
+#define OF_PATH_CLOSE 4
+int of_face_glyph_outline(OFFace *face, uint32_t glyph_id,
+                          uint8_t *verbs, size_t verb_capacity,
+                          int32_t *points, size_t point_capacity,
+                          size_t *nverbs, size_t *npoints);
+
+/* The face's table tag ('MATH', 'OS/2') as it is in the font, or NULL
+ * when it has none. It lives as long as the face. */
+const uint8_t *of_face_table(OFFace *face, uint32_t tag, size_t *length);
 
 int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out);
 /* The same through a 2 x 2 matrix m of 16.16 pixels to the em, y up

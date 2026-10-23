@@ -463,14 +463,14 @@ static void vec_push(GlyphVec *v, const OFGlyph *g)
  * fallbacks' pieces reuse it, since a piece of a run (an emoji, a mark)
  * can't tell its own. */
 static int shape_item(OFFace *face, uint16_t face_no, const char *utf8, size_t bytes,
-                      size_t off, size_t len, unsigned *script, GlyphVec *out)
+                      size_t off, size_t len, OFRunProps *props, GlyphVec *out)
 {
     OFShBuf b;
     uint32_t i;
     int rc;
 
     memset(&b, 0, sizeof b);
-    rc = of_shape_text(&face->font, face->pixel_size, utf8, bytes, off, len, script, &b);
+    rc = of_shape_text(&face->font, face->pixel_size, utf8, bytes, off, len, props, &b);
     if (rc != OF_OK) {
         free(b.g);
         return rc;
@@ -508,7 +508,7 @@ static void push_marked(GlyphVec *out, const OFGlyph *g, size_t n)
  * what the last face can't show is the first face's own shaping of it (its
  * glyph 0, marked missing). */
 static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t bytes,
-                       size_t off, size_t len, unsigned *script, GlyphVec *out)
+                       size_t off, size_t len, OFRunProps *props, GlyphVec *out)
 {
     OFFace *face = level ? root->fallbacks[level - 1] : root;
     GlyphVec tmp;
@@ -519,7 +519,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
     memset(&tmp, 0, sizeof tmp);
     if (level && of_face_set_pixel_size(face, root->pixel_size) != OF_OK)
         return OF_ERR_FONT;
-    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, script, &tmp);
+    rc = shape_item(face, (uint16_t)level, utf8, bytes, off, len, props, &tmp);
     if (rc != OF_OK) {
         free(tmp.g);
         return rc;
@@ -567,7 +567,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
             if (tmp.g[k].cluster > cmax && tmp.g[k].cluster < end)
                 end = tmp.g[k].cluster;
         if (level < root->nfallbacks) {
-            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, script, out);
+            rc = shape_chain(root, level + 1, utf8, bytes, cmin, end - cmin, props, out);
             if (rc != OF_OK)
                 break;
         } else if (level) {
@@ -575,7 +575,7 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
              * so its glyph numbers, advances and pixels agree */
             GlyphVec first;
             memset(&first, 0, sizeof first);
-            rc = shape_item(root, 0, utf8, bytes, cmin, end - cmin, script, &first);
+            rc = shape_item(root, 0, utf8, bytes, cmin, end - cmin, props, &first);
             if (rc == OF_OK)
                 push_marked(out, first.g, first.n);
             free(first.g);
@@ -593,36 +593,176 @@ static int shape_chain(OFFace *root, uint32_t level, const char *utf8, size_t by
     return rc;
 }
 
+/* Shapes utf8[off, off + len) with face and its fallbacks into a vector the
+ * caller frees. */
+static int shape_run(OFFace *face, const char *utf8, size_t bytes, size_t off, size_t len,
+                     const OFShapeOptions *options, GlyphVec *v)
+{
+    OFRunProps props;
+    memset(v, 0, sizeof *v);
+    memset(&props, 0, sizeof props);
+    props.script = OF_SCRIPT_UNKNOWN;
+    if (options) {
+        if (options->script) {
+            unsigned sc = of_script_from_iso(options->script);
+            if (sc != OF_SCRIPT_UNKNOWN)
+                props.script = sc;
+        }
+        props.lang_tag = options->language;
+        props.direction = options->direction <= OF_DIR_RTL ? options->direction : OF_DIR_AUTO;
+        props.features = options->features;
+        props.nfeatures = options->features ? options->num_features : 0;
+    }
+    if (off > bytes)
+        return OF_ERR_ARGUMENT;
+    if (len > bytes - off)
+        len = bytes - off;
+    if (!len)
+        return OF_OK;
+    return shape_chain(face, 0, utf8, bytes, off, len, &props, v);
+}
+
+static size_t copy_out(GlyphVec *v, OFGlyph *out, size_t capacity)
+{
+    size_t n = v->n;
+    if (out && capacity)
+        memcpy(out, v->g, (n < capacity ? n : capacity) * sizeof(*out));
+    free(v->g);
+    return n;
+}
+
 size_t of_shape_utf8(OFFace *face, const char *utf8, size_t bytes,
                      OFGlyph *out, size_t capacity)
 {
+    return of_shape(face, utf8, bytes, 0, bytes, NULL, out, capacity);
+}
+
+size_t of_shape(OFFace *face, const char *utf8, size_t bytes, size_t off, size_t len,
+                const OFShapeOptions *options, OFGlyph *out, size_t capacity)
+{
     GlyphVec v;
-    unsigned script = OF_SCRIPT_UNKNOWN;
-    size_t n;
     if (!face || !utf8 || !bytes)
         return 0;
-    memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &script, &v) != OF_OK) {
+    if (shape_run(face, utf8, bytes, off, len, options, &v) != OF_OK) {
         free(v.g);
         return 0;
     }
-    n = v.n;
-    if (out && capacity)
-        memcpy(out, v.g, (n < capacity ? n : capacity) * sizeof(*out));
-    free(v.g);
-    return n;
+    return copy_out(&v, out, capacity);
+}
+
+/* UTF-16 to UTF-8, with where each byte's character starts in the UTF-16
+ * (map[byte], map[bytes] = units) and each unit's first byte (back[unit],
+ * back[units] = bytes). A lone surrogate is U+FFFD. */
+static char *utf16_to_utf8(const uint16_t *t, size_t units, size_t *bytes_out,
+                           uint32_t **map_out, uint32_t **back_out)
+{
+    char *u = (char *)malloc(units * 3 + 1);
+    uint32_t *map = (uint32_t *)malloc((units * 3 + 1) * sizeof(uint32_t));
+    uint32_t *back = (uint32_t *)malloc((units + 1) * sizeof(uint32_t));
+    size_t i = 0, n = 0;
+    if (!u || !map || !back) {
+        free(u);
+        free(map);
+        free(back);
+        return NULL;
+    }
+    while (i < units) {
+        uint32_t cp = t[i];
+        size_t start = i, k, len;
+        i++;
+        if (cp >= 0xD800 && cp < 0xDC00 && i < units && t[i] >= 0xDC00 && t[i] < 0xE000) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (t[i] - 0xDC00);
+            i++;
+        } else if (cp >= 0xD800 && cp < 0xE000) {
+            cp = 0xFFFD;
+        }
+        len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+        switch (len) {
+        case 1:
+            u[n] = (char)cp;
+            break;
+        case 2:
+            u[n] = (char)(0xC0 | (cp >> 6));
+            u[n + 1] = (char)(0x80 | (cp & 0x3F));
+            break;
+        case 3:
+            u[n] = (char)(0xE0 | (cp >> 12));
+            u[n + 1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            u[n + 2] = (char)(0x80 | (cp & 0x3F));
+            break;
+        default:
+            u[n] = (char)(0xF0 | (cp >> 18));
+            u[n + 1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            u[n + 2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            u[n + 3] = (char)(0x80 | (cp & 0x3F));
+            break;
+        }
+        for (k = 0; k < len; ++k)
+            map[n + k] = (uint32_t)start;
+        for (k = start; k < i; ++k)
+            back[k] = (uint32_t)n;
+        n += len;
+    }
+    map[n] = (uint32_t)units;
+    back[units] = (uint32_t)n;
+    *bytes_out = n;
+    *map_out = map;
+    *back_out = back;
+    return u;
+}
+
+size_t of_shape_utf16(OFFace *face, const uint16_t *text, size_t units, size_t off, size_t len,
+                      const OFShapeOptions *options, OFGlyph *out, size_t capacity)
+{
+    GlyphVec v;
+    OFShapeOptions o;
+    OFFeature features[OF_MAX_FEATURES];
+    uint32_t *map, *back;
+    size_t bytes, i, end;
+    char *u;
+    int rc;
+    if (!face || !text || !units || off >= units)
+        return 0;
+    end = len > units - off ? units : off + len;
+    u = utf16_to_utf8(text, units, &bytes, &map, &back);
+    if (!u)
+        return 0;
+    memset(&o, 0, sizeof o);
+    if (options) {
+        o = *options;
+        o.num_features = options->features ? (options->num_features < OF_MAX_FEATURES ? options->num_features : OF_MAX_FEATURES) : 0;
+        for (i = 0; i < o.num_features; ++i) {
+            features[i] = options->features[i];
+            /* the features' ranges in bytes */
+            if (!(features[i].start == 0 && features[i].end == OF_FEATURE_END)) {
+                features[i].start = features[i].start >= units ? (uint32_t)bytes : back[features[i].start];
+                features[i].end = features[i].end >= units ? (uint32_t)bytes : back[features[i].end];
+            }
+        }
+        o.features = features;
+    }
+    rc = shape_run(face, u, bytes, back[off], back[end] - back[off], &o, &v);
+    if (rc == OF_OK)
+        for (i = 0; i < v.n; ++i)
+            v.g[i].cluster = map[v.g[i].cluster];
+    free(u);
+    free(map);
+    free(back);
+    if (rc != OF_OK) {
+        free(v.g);
+        return 0;
+    }
+    return copy_out(&v, out, capacity);
 }
 
 int64_t of_measure_utf8(OFFace *face, const char *utf8, size_t bytes)
 {
     GlyphVec v;
-    unsigned script = OF_SCRIPT_UNKNOWN;
     size_t i;
     int64_t total = 0;
     if (!face || !utf8 || !bytes)
         return 0;
-    memset(&v, 0, sizeof v);
-    if (shape_chain(face, 0, utf8, bytes, 0, bytes, &script, &v) != OF_OK) {
+    if (shape_run(face, utf8, bytes, 0, bytes, NULL, &v) != OF_OK) {
         free(v.g);
         return 0;
     }
@@ -807,4 +947,283 @@ const char *of_error_string(int code)
     case OF_ERR_EXEC: return "executor failed";
     default: return "unknown error";
     }
+}
+
+/* ---- what a layout engine (WebCore) asks of a face ---- */
+
+static int32_t units_px(const OFFace *face, int32_t v)
+{
+    /* font units to 26.6 at the face's size, rounded half away from zero */
+    int64_t x = (int64_t)v * (int64_t)face->pixel_size * 64;
+    uint32_t upem = face->font.units_per_em ? face->font.units_per_em : 1000;
+    return (int32_t)(x >= 0 ? (x + upem / 2) / upem : -((-x + upem / 2) / upem));
+}
+
+/* the top of a character's outline in font units, 0 when it has none */
+static int32_t glyph_top_units(OFFace *face, uint32_t cp)
+{
+    uint32_t g = of_font_glyph(&face->font, cp), i;
+    int32_t top = 0;
+    of_path_reset(&face->path);
+    if (!g || of_font_outline(&face->font, g, &face->path) != OF_OK || !face->path.npoints)
+        return 0;
+    for (i = 0; i < face->path.npoints; ++i)
+        if (i == 0 || face->path.y[i] > top)
+            top = face->path.y[i];
+    return top >> 16;   /* 16.16 units */
+}
+
+int of_face_metrics(OFFace *face, OFFaceMetrics *m)
+{
+    const OFFont *f;
+    int32_t a, d, h;
+    uint32_t space;
+    if (!face || !m)
+        return OF_ERR_ARGUMENT;
+    f = &face->font;
+    memset(m, 0, sizeof *m);
+    m->units_per_em = f->units_per_em;
+    m->pixel_size = face->pixel_size;
+    of_font_line_px(f, face->pixel_size, &a, &d, &h);
+    m->ascender = a;
+    m->descender = d;
+    m->line_gap = h - (a - d);
+    if (m->line_gap < 0)
+        m->line_gap = 0;
+    if (f->os2_version != 0xFFFF && f->os2_version >= 2 && f->os2.len >= 90) {
+        m->x_height = units_px(face, of_s16(f->data + f->os2.off + 86));
+        m->cap_height = units_px(face, of_s16(f->data + f->os2.off + 88));
+    }
+    if (!m->x_height)
+        m->x_height = units_px(face, glyph_top_units(face, 'x'));
+    if (!m->cap_height)
+        m->cap_height = units_px(face, glyph_top_units(face, 'H'));
+    if (f->post.len >= 12) {
+        m->underline_position = units_px(face, of_s16(f->data + f->post.off + 8));
+        m->underline_thickness = units_px(face, of_s16(f->data + f->post.off + 10));
+    }
+    if (f->os2_version != 0xFFFF && f->os2.len >= 30) {
+        m->strikeout_thickness = units_px(face, of_s16(f->data + f->os2.off + 26));
+        m->strikeout_position = units_px(face, of_s16(f->data + f->os2.off + 28));
+    }
+    if (f->hhea.len >= 12)
+        m->max_advance = units_px(face, (int32_t)of_u16(f->data + f->hhea.off + 10));
+    space = of_font_glyph(f, ' ');
+    if (space)
+        m->space_advance = of_font_advance_px(f, space, face->pixel_size);
+    if (of_font_style(f) & OF_STYLE_ITALIC)
+        m->flags |= OF_FACE_ITALIC;
+    if (f->is_fixed_pitch)
+        m->flags |= OF_FACE_FIXED;
+    if (f->scalable)
+        m->flags |= OF_FACE_SCALABLE;
+    if (of_font_has_color(f))
+        m->flags |= OF_FACE_COLOR;
+    return OF_OK;
+}
+
+int32_t of_face_glyph_advance_px(OFFace *face, uint32_t glyph_id)
+{
+    if (!face || glyph_id >= face->font.num_glyphs)
+        return -1;
+    return of_font_advance_px(&face->font, glyph_id, face->pixel_size);
+}
+
+int of_face_glyph_extents(OFFace *face, uint32_t glyph_id, OFGlyphExtents *e)
+{
+    int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    uint32_t i;
+    int rc;
+    if (!face || !e)
+        return OF_ERR_ARGUMENT;
+    memset(e, 0, sizeof *e);
+    if (glyph_id >= face->font.num_glyphs)
+        return OF_ERR_RANGE;
+    if (!face->font.scalable) {
+        /* a bitmap-only face: the bitmap's box */
+        OFBitmap bm;
+        if ((rc = of_raster_glyph_a8(face, glyph_id, &bm)) != OF_OK)
+            return rc;
+        e->x_bearing = bm.left * 64;
+        e->y_bearing = bm.top * 64;
+        e->width = (int32_t)bm.width * 64;
+        e->height = (int32_t)bm.height * 64;
+        of_bitmap_release(&bm);
+        return OF_OK;
+    }
+    of_path_reset(&face->path);
+    rc = of_font_outline_px(&face->font, glyph_id, face->pixel_size, &face->path);
+    if (rc != OF_OK)
+        return rc;
+    if (face->path.failed)
+        return OF_ERR_MEMORY;
+    for (i = 0; i < face->path.npoints; ++i) {
+        int32_t x = face->path.x[i], y = face->path.y[i];
+        if (i == 0 || x < x0)
+            x0 = x;
+        if (i == 0 || x > x1)
+            x1 = x;
+        if (i == 0 || y < y0)
+            y0 = y;
+        if (i == 0 || y > y1)
+            y1 = y;
+    }
+    if (!face->path.npoints)
+        return OF_OK;
+    e->x_bearing = x0;
+    e->y_bearing = y1;
+    e->width = x1 - x0;
+    e->height = y1 - y0;
+    return OF_OK;
+}
+
+/* Builds the verbs and points of an outline, counting what does not fit. */
+typedef struct OutlineOut {
+    uint8_t *verbs;
+    size_t verb_cap, nverbs;
+    int32_t *points;
+    size_t point_cap, npoints;
+} OutlineOut;
+
+static void out_verb(OutlineOut *o, uint8_t v)
+{
+    if (o->verbs && o->nverbs < o->verb_cap)
+        o->verbs[o->nverbs] = v;
+    o->nverbs++;
+}
+
+static void out_point(OutlineOut *o, int32_t x, int32_t y)
+{
+    if (o->points && o->npoints < o->point_cap) {
+        o->points[2 * o->npoints] = x;
+        o->points[2 * o->npoints + 1] = y;
+    }
+    o->npoints++;
+}
+
+int of_face_glyph_outline(OFFace *face, uint32_t glyph_id,
+                          uint8_t *verbs, size_t verb_capacity,
+                          int32_t *points, size_t point_capacity,
+                          size_t *nverbs, size_t *npoints)
+{
+    OutlineOut o;
+    const OFPath *p;
+    uint32_t c, start = 0;
+    int rc;
+    if (!face)
+        return OF_ERR_ARGUMENT;
+    if (glyph_id >= face->font.num_glyphs)
+        return OF_ERR_RANGE;
+    memset(&o, 0, sizeof o);
+    o.verbs = verbs;
+    o.verb_cap = verb_capacity;
+    o.points = points;
+    o.point_cap = point_capacity;
+    of_path_reset(&face->path);
+    rc = of_font_outline_px(&face->font, glyph_id, face->pixel_size, &face->path);
+    if (rc != OF_OK)
+        return rc;
+    p = &face->path;
+    if (p->failed)
+        return OF_ERR_MEMORY;
+    for (c = 0; c < p->ncontours; ++c) {
+        uint32_t end = p->ends[c], n = end + 1 - start, k, first;
+        int32_t sx, sy;
+        if (end < start || end >= p->npoints) {
+            start = end + 1;
+            continue;
+        }
+        /* start on an on-curve point; a contour of quadratic control
+         * points only starts between its first two */
+        for (first = 0; first < n && p->tag[start + first] != OF_PT_ON; ++first)
+            ;
+        if (first == n) {
+            sx = (p->x[start] + p->x[start + (n > 1 ? 1 : 0)]) / 2;
+            sy = (p->y[start] + p->y[start + (n > 1 ? 1 : 0)]) / 2;
+            first = 0;
+        } else {
+            sx = p->x[start + first];
+            sy = p->y[start + first];
+            first++;
+        }
+        out_verb(&o, OF_PATH_MOVE);
+        out_point(&o, sx, sy);
+        for (k = 0; k < n;) {
+            uint32_t i = start + (first + k) % n;
+            int last = k + 1 == n;
+            if (p->tag[i] == OF_PT_ON) {
+                if (!(last && p->x[i] == sx && p->y[i] == sy)) {
+                    out_verb(&o, OF_PATH_LINE);
+                    out_point(&o, p->x[i], p->y[i]);
+                }
+                k++;
+            } else if (p->tag[i] == OF_PT_CUBIC) {
+                uint32_t i2 = start + (first + k + 1) % n, i3 = start + (first + k + 2) % n;
+                out_verb(&o, OF_PATH_CUBIC);
+                out_point(&o, p->x[i], p->y[i]);
+                out_point(&o, p->x[i2], p->y[i2]);
+                if (k + 2 >= n)
+                    out_point(&o, sx, sy);
+                else
+                    out_point(&o, p->x[i3], p->y[i3]);
+                k += 3;
+            } else {
+                /* a quadratic control point: to the next on-curve point, or
+                 * to the midpoint of two control points in a row */
+                uint32_t j = start + (first + k + 1) % n;
+                int32_t ex, ey;
+                if (k + 1 >= n) {
+                    ex = sx;
+                    ey = sy;
+                } else if (p->tag[j] == OF_PT_ON) {
+                    ex = p->x[j];
+                    ey = p->y[j];
+                } else {
+                    ex = (p->x[i] + p->x[j]) / 2;
+                    ey = (p->y[i] + p->y[j]) / 2;
+                }
+                out_verb(&o, OF_PATH_QUAD);
+                out_point(&o, p->x[i], p->y[i]);
+                out_point(&o, ex, ey);
+                k += (k + 1 < n && p->tag[j] == OF_PT_ON) ? 2 : 1;
+            }
+        }
+        out_verb(&o, OF_PATH_CLOSE);
+        start = end + 1;
+    }
+    if (nverbs)
+        *nverbs = o.nverbs;
+    if (npoints)
+        *npoints = o.npoints;
+    return (o.nverbs > verb_capacity || o.npoints > point_capacity) ? OF_ERR_BUFFER : OF_OK;
+}
+
+const uint8_t *of_face_table(OFFace *face, uint32_t tag, size_t *length)
+{
+    const OFFont *f;
+    uint32_t n, i;
+    if (length)
+        *length = 0;
+    if (!face)
+        return NULL;
+    f = &face->font;
+    if ((size_t)f->dir + 12 > f->size)
+        return NULL;
+    n = of_u16(f->data + f->dir + 4);
+    for (i = 0; i < n; ++i) {
+        const uint8_t *r = f->data + f->dir + 12 + 16 * i;
+        uint32_t off, len;
+        if ((size_t)(r - f->data) + 16 > f->size)
+            return NULL;
+        if (of_u32(r) != tag)
+            continue;
+        off = of_u32(r + 8);
+        len = of_u32(r + 12);
+        if (off > f->size || len > f->size - off)
+            return NULL;
+        if (length)
+            *length = len;
+        return f->data + off;
+    }
+    return NULL;
 }

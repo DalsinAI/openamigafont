@@ -213,4 +213,14 @@ enum {
     OF_SCRIPT_COUNT = 171
 };
 
+/* joining types (ArabicShaping.txt) */
+enum {
+    OF_JT_U = 0,
+    OF_JT_R = 1,
+    OF_JT_L = 2,
+    OF_JT_D = 3,
+    OF_JT_C = 4,
+    OF_JT_T = 5,
+};
+
 #endif

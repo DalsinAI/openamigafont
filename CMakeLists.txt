@@ -67,6 +67,11 @@ if(OPENFONT_DEJAVU_SANS)
              ${CMAKE_CURRENT_SOURCE_DIR}/tests/shape/latin.txt)
 endif()
 
+# The shaper with a direction, script, language and features, for
+# tests/ref/compare_uharfbuzz.py
+add_executable(shapeopts tests/shape/shapeopts.c)
+target_link_libraries(shapeopts PRIVATE openfont)
+
 # The reader and rasteriser alone, on any fonts at hand (no reference).
 add_executable(test_reader tests/test_reader.c)
 target_include_directories(test_reader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

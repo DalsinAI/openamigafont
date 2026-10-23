@@ -5,14 +5,17 @@
 
 UCD_DIR holds the UCD 16.0.0 files (https://www.unicode.org/Public/16.0.0/ucd/):
 UnicodeData.txt, DerivedCoreProperties.txt, DerivedNormalizationProps.txt,
-Scripts.txt. The data is the Unicode Consortium's, under the Unicode License
+Scripts.txt, ArabicShaping.txt, BidiMirroring.txt, PropertyValueAliases.txt. The data is the Unicode Consortium's, under the Unicode License
 v3 (LICENSES/Unicode-License-v3.txt); this script is the AmigaChrome Team's,
 MIT licence.
 
 Per codepoint it records the general category, the canonical combining class,
 whether it is a default ignorable, and its script, in two-stage tables (a
 block index for each 128 codepoints, the blocks shared). It also writes the
-canonical decompositions and the primary composites NFC builds.
+canonical decompositions and the primary composites NFC builds, the joining
+types ArabicShaping.txt lists (for Arabic, Syriac, N'Ko, Mongolian and the
+other joining scripts) and the mirrored pairs of BidiMirroring.txt (for
+right-to-left text).
 """
 import os
 import sys
@@ -91,6 +94,32 @@ def main():
         for c in range(a, b + 1):
             script[c] = k
     assert len(script_names) < 256
+
+    # joining types listed in ArabicShaping.txt, as ranges of one type;
+    # the rest is T for Mn, Me and Cf and U otherwise, worked out at run time
+    JT = {"U": 0, "R": 1, "L": 2, "D": 3, "C": 4, "T": 5}
+    jt = {}
+    for a, b, f in ranges(os.path.join(ucd, "ArabicShaping.txt")):
+        for c in range(a, b + 1):
+            jt[c] = JT[f[1]]
+    joins = []
+    for c in sorted(jt):
+        if joins and joins[-1][1] == c - 1 and joins[-1][2] == jt[c]:
+            joins[-1][1] = c
+        else:
+            joins.append([c, c, jt[c]])
+    mirror = []
+    for a, b, f in ranges(os.path.join(ucd, "BidiMirroring.txt")):
+        mirror.append((a, int(f[0], 16)))
+    mirror.sort()
+    # each script's ISO 15924 code (PropertyValueAliases.txt, "sc")
+    iso = {}
+    with open(os.path.join(ucd, "PropertyValueAliases.txt"), encoding="utf-8") as f:
+        for line in f:
+            p = [x.strip() for x in line.split("#", 1)[0].split(";")]
+            if len(p) >= 3 and p[0] == "sc":
+                iso[p[2]] = p[1]
+    iso_codes = [iso.get(name, "Zzzz") for name in script_names]
 
     # records: (gc, ccc, ignorable) -> index
     records = [(0, 0, 0)]
@@ -171,6 +200,68 @@ def main():
     o.append(carray("comp_a", "uint32_t", [x[0] for x in comp], 8))
     o.append(carray("comp_b", "uint32_t", [x[1] for x in comp], 8))
     o.append(carray("comp_c", "uint32_t", [x[2] for x in comp], 8))
+    o.append("/* joining types (ArabicShaping.txt): ranges of one type, OF_JT_* */\n")
+    o.append(carray("join_first", "uint32_t", [x[0] for x in joins], 8))
+    o.append(carray("join_last", "uint32_t", [x[1] for x in joins], 8))
+    o.append(carray("join_type", "uint8_t", [x[2] for x in joins]))
+    o.append("/* mirrored pairs (BidiMirroring.txt), by codepoint */\n")
+    o.append(carray("mirror_cp", "uint32_t", [x[0] for x in mirror], 8))
+    o.append(carray("mirror_to", "uint32_t", [x[1] for x in mirror], 8))
+    o.append("/* each script's ISO 15924 code, by OF_SCRIPT_* */\n")
+    o.append("static const char script_iso[%d][5] = {\n" % len(iso_codes))
+    for i in range(0, len(iso_codes), 8):
+        o.append("    " + ", ".join('"%s"' % c for c in iso_codes[i:i + 8]) + ",\n")
+    o.append("};\n\n")
+    o.append("""uint32_t of_uni_script_iso(unsigned script)
+{
+    const char *c = script < sizeof script_iso / sizeof script_iso[0] ? script_iso[script] : "Zzzz";
+    return ((uint32_t)(uint8_t)c[0] << 24) | ((uint32_t)(uint8_t)c[1] << 16) |
+           ((uint32_t)(uint8_t)c[2] << 8) | (uint32_t)(uint8_t)c[3];
+}
+
+unsigned of_uni_script_from_iso(uint32_t code)
+{
+    unsigned i;
+    for (i = 0; i < sizeof script_iso / sizeof script_iso[0]; ++i)
+        if (of_uni_script_iso(i) == code)
+            return i;
+    return OF_SCRIPT_UNKNOWN;
+}
+
+""")
+    o.append("""unsigned of_uni_joining_type(uint32_t cp)
+{
+    size_t lo = 0, hi = sizeof join_first / sizeof join_first[0];
+    unsigned c;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (join_last[mid] < cp)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo < sizeof join_first / sizeof join_first[0] && join_first[lo] <= cp)
+        return join_type[lo];
+    c = of_uni_category(cp);
+    return (c == OF_GC_MN || c == OF_GC_ME || c == OF_GC_CF) ? OF_JT_T : OF_JT_U;
+}
+
+uint32_t of_uni_mirror(uint32_t cp)
+{
+    size_t lo = 0, hi = sizeof mirror_cp / sizeof mirror_cp[0];
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (mirror_cp[mid] < cp)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo < sizeof mirror_cp / sizeof mirror_cp[0] && mirror_cp[lo] == cp)
+        return mirror_to[lo];
+    return 0;
+}
+
+""")
     o.append("""/* the tables' row for cp, or -1 outside them */
 static long row(uint32_t cp)
 {
@@ -287,13 +378,18 @@ uint32_t of_uni_compose(uint32_t a, uint32_t b)
     h.append("};\n\n/* scripts (Scripts.txt) */\nenum {\n")
     for i, s in enumerate(script_names):
         h.append("    OF_SCRIPT_%s = %d,\n" % (s.upper(), i))
-    h.append("    OF_SCRIPT_COUNT = %d\n};\n\n#endif\n" % len(script_names))
+    h.append("    OF_SCRIPT_COUNT = %d\n};\n\n" % len(script_names))
+    h.append("/* joining types (ArabicShaping.txt) */\nenum {\n")
+    for k, v in sorted(JT.items(), key=lambda kv: kv[1]):
+        h.append("    OF_JT_%s = %d,\n" % (k, v))
+    h.append("};\n\n#endif\n")
     with open(hdr, "w", encoding="utf-8") as f:
         f.write("".join(h))
     size = len(records) * 3 + len(prop1) * (2 if len(propb) > 255 else 1) + len(propb) * BLOCK \
-        + len(scr1) * (2 if len(scrb) > 255 else 1) + len(scrb) * BLOCK + len(dec) * 12 + len(comp) * 12
-    print("%s: %d records, %d property blocks, %d script blocks, %d decompositions, %d composites, about %d bytes"
-          % (out, len(records), len(propb), len(scrb), len(dec), len(comp), size))
+        + len(scr1) * (2 if len(scrb) > 255 else 1) + len(scrb) * BLOCK + len(dec) * 12 + len(comp) * 12 \
+        + len(joins) * 9 + len(mirror) * 8
+    print("%s: %d records, %d property blocks, %d script blocks, %d decompositions, %d composites, %d joining ranges, %d mirrored, about %d bytes"
+          % (out, len(records), len(propb), len(scrb), len(dec), len(comp), len(joins), len(mirror), size))
 
 
 if __name__ == "__main__":

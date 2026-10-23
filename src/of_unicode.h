@@ -29,6 +29,17 @@ int of_uni_decompose(uint32_t cp, uint32_t *a, uint32_t *b);
 /* The primary composite of a and b, or 0 */
 uint32_t of_uni_compose(uint32_t a, uint32_t b);
 
+/* OF_JT_* (ArabicShaping.txt; T for other Mn, Me and Cf, U for the rest) */
+unsigned of_uni_joining_type(uint32_t cp);
+
+/* a script's ISO 15924 code ('Latn', 'Zyyy' for Common) as a tag, and
+ * back (OF_SCRIPT_UNKNOWN for a code it doesn't know) */
+uint32_t of_uni_script_iso(unsigned script);
+unsigned of_uni_script_from_iso(uint32_t code);
+
+/* cp's mirrored character (BidiMirroring.txt), 0 when it has none */
+uint32_t of_uni_mirror(uint32_t cp);
+
 static inline int of_uni_is_mark(uint32_t cp)
 {
     unsigned c = of_uni_category(cp);

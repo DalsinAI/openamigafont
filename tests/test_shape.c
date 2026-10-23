@@ -78,8 +78,8 @@ static unsigned char *read_file(const char *path, size_t *size)
 
 static uint32_t shape(const OFFont *f, uint32_t ppem, const char *s, OFShBuf *b)
 {
-    unsigned script = OF_SCRIPT_UNKNOWN;
-    if (of_shape_text(f, ppem, s, strlen(s), 0, strlen(s), &script, b) != OF_OK)
+    OFRunProps props = { OF_SCRIPT_UNKNOWN, 0, 0, OF_DIR_AUTO, NULL, 0 };
+    if (of_shape_text(f, ppem, s, strlen(s), 0, strlen(s), &props, b) != OF_OK)
         return 0;
     return b->n;
 }
@@ -165,9 +165,9 @@ static uint32_t shape_lines(const OFFont *f, const char *text, uint32_t *runs)
         while (*p) {
             const char *e = strchr(p, '\n');
             size_t len = e ? (size_t)(e - p) : strlen(p);
-            unsigned script = OF_SCRIPT_UNKNOWN;
+            OFRunProps props = { OF_SCRIPT_UNKNOWN, 0, 0, OF_DIR_AUTO, NULL, 0 };
             uint32_t i;
-            if (of_shape_text(f, sizes[s], p, len, 0, len, &script, &b) == OF_OK)
+            if (of_shape_text(f, sizes[s], p, len, 0, len, &props, &b) == OF_OK)
                 for (i = 0; i < b.n; ++i) {
                     hash = mix(hash, b.g[i].gid);
                     hash = mix(hash, b.g[i].cluster);

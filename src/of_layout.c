@@ -188,6 +188,7 @@ typedef struct Planned {
     uint16_t index;
     uint32_t mask;
     uint8_t stage;
+    uint16_t value;             /* the feature's value: an alternate's number */
 } Planned;
 
 typedef struct Plan {
@@ -199,42 +200,161 @@ typedef struct Want {
     uint32_t tag;
     uint32_t mask;
     uint8_t stage;
+    uint16_t value;
 } Want;
 
 /* The features the shaper turns on for horizontal, left-to-right text:
  * the OpenType specification's registered default features for the
  * standard scripts, and the fraction features on their ranges. */
 static const Want gsub_wants[] = {
-    { OF_TAG('r', 'v', 'r', 'n'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('l', 't', 'r', 'a'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('l', 't', 'r', 'm'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('f', 'r', 'a', 'c'), OF_MASK_FRAC, 1 },
-    { OF_TAG('n', 'u', 'm', 'r'), OF_MASK_NUMR, 1 },
-    { OF_TAG('d', 'n', 'o', 'm'), OF_MASK_DNOM, 1 },
-    { OF_TAG('c', 'c', 'm', 'p'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('l', 'o', 'c', 'l'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('r', 'l', 'i', 'g'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('c', 'a', 'l', 't'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('c', 'l', 'i', 'g'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('l', 'i', 'g', 'a'), OF_MASK_GLOBAL, 1 },
-    { OF_TAG('r', 'c', 'l', 't'), OF_MASK_GLOBAL, 1 },
+    { OF_TAG('r', 'v', 'r', 'n'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('l', 't', 'r', 'a'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('l', 't', 'r', 'm'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('f', 'r', 'a', 'c'), OF_MASK_FRAC, 1, 1 },
+    { OF_TAG('n', 'u', 'm', 'r'), OF_MASK_NUMR, 1, 1 },
+    { OF_TAG('d', 'n', 'o', 'm'), OF_MASK_DNOM, 1, 1 },
+    { OF_TAG('c', 'c', 'm', 'p'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('l', 'o', 'c', 'l'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('r', 'l', 'i', 'g'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('c', 'a', 'l', 't'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('c', 'l', 'i', 'g'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('l', 'i', 'g', 'a'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('r', 'c', 'l', 't'), OF_MASK_GLOBAL, 1, 1 },
+};
+
+/* Right to left, rtla and rtlm in place of ltra and ltrm. With joining
+ * characters, the order the OpenType specification gives the joining
+ * scripts: the forms each in a stage of their own, after ccmp and locl
+ * and before rlig, then calt, then the rest. */
+static const Want gsub_joining_wants[] = {
+    { OF_TAG('r', 'v', 'r', 'n'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('f', 'r', 'a', 'c'), OF_MASK_FRAC, 1, 1 },
+    { OF_TAG('n', 'u', 'm', 'r'), OF_MASK_NUMR, 1, 1 },
+    { OF_TAG('d', 'n', 'o', 'm'), OF_MASK_DNOM, 1, 1 },
+    { OF_TAG('c', 'c', 'm', 'p'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('l', 'o', 'c', 'l'), OF_MASK_GLOBAL, 1, 1 },
+    { OF_TAG('i', 's', 'o', 'l'), OF_MASK_ISOL, 2, 1 },
+    { OF_TAG('f', 'i', 'n', 'a'), OF_MASK_FINA, 3, 1 },
+    { OF_TAG('m', 'e', 'd', 'i'), OF_MASK_MEDI, 4, 1 },
+    { OF_TAG('i', 'n', 'i', 't'), OF_MASK_INIT, 5, 1 },
+    { OF_TAG('r', 'l', 'i', 'g'), OF_MASK_GLOBAL, 6, 1 },
+    { OF_TAG('c', 'a', 'l', 't'), OF_MASK_GLOBAL, 7, 1 },
+    { OF_TAG('c', 'l', 'i', 'g'), OF_MASK_GLOBAL, 8, 1 },
+    { OF_TAG('l', 'i', 'g', 'a'), OF_MASK_GLOBAL, 8, 1 },
+    { OF_TAG('r', 'c', 'l', 't'), OF_MASK_GLOBAL, 8, 1 },
+    { OF_TAG('m', 's', 'e', 't'), OF_MASK_GLOBAL, 8, 1 },
 };
 
 static const Want gpos_wants[] = {
-    { OF_TAG('a', 'b', 'v', 'm'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('b', 'l', 'w', 'm'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('m', 'a', 'r', 'k'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('m', 'k', 'm', 'k'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('c', 'u', 'r', 's'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('d', 'i', 's', 't'), OF_MASK_GLOBAL, 0 },
-    { OF_TAG('k', 'e', 'r', 'n'), OF_MASK_GLOBAL, 0 },
+    { OF_TAG('a', 'b', 'v', 'm'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('b', 'l', 'w', 'm'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('m', 'a', 'r', 'k'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('m', 'k', 'm', 'k'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('c', 'u', 'r', 's'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('d', 'i', 's', 't'), OF_MASK_GLOBAL, 0, 1 },
+    { OF_TAG('k', 'e', 'r', 'n'), OF_MASK_GLOBAL, 0, 1 },
 };
 
-/* the default language system of the script, or of DFLT, dflt or latn
- * when the font has none for it; 0 when none of them */
-static uint32_t langsys(const Tab *t, uint32_t script_tag)
+#define MAX_WANTS (sizeof gsub_joining_wants / sizeof gsub_joining_wants[0] + 2 + OF_MAX_FEATURES)
+
+/* The features for spec: the shaper's own for its direction and joining,
+ * then the program's on top (a value of 0 over the whole text takes one
+ * of the shaper's away). Returns how many. */
+static size_t make_wants(const OFLayoutSpec *spec, int gpos, Want *out)
 {
-    uint32_t sl = r16(t, 4), n = r16(t, sl), k, i;
+    const Want *base;
+    size_t nb, n = 0, i, k;
+    uint8_t last_stage;
+    if (gpos) {
+        base = gpos_wants;
+        nb = sizeof gpos_wants / sizeof gpos_wants[0];
+    } else if (spec && spec->joining) {
+        base = gsub_joining_wants;
+        nb = sizeof gsub_joining_wants / sizeof gsub_joining_wants[0];
+    } else {
+        base = gsub_wants;
+        nb = sizeof gsub_wants / sizeof gsub_wants[0];
+    }
+    for (i = 0; i < nb; ++i) {
+        Want w = base[i];
+        if (spec && spec->rtl && w.tag == OF_TAG('l', 't', 'r', 'a'))
+            w.tag = OF_TAG('r', 't', 'l', 'a');
+        if (spec && spec->rtl && w.tag == OF_TAG('l', 't', 'r', 'm'))
+            w.tag = OF_TAG('r', 't', 'l', 'm');
+        out[n++] = w;
+    }
+    if (!gpos && spec && spec->joining && spec->rtl) {
+        Want a = { OF_TAG('r', 't', 'l', 'a'), OF_MASK_GLOBAL, 1, 1 };
+        Want m = { OF_TAG('r', 't', 'l', 'm'), OF_MASK_GLOBAL, 1, 1 };
+        out[n++] = a;
+        out[n++] = m;
+    } else if (!gpos && spec && spec->joining) {
+        Want a = { OF_TAG('l', 't', 'r', 'a'), OF_MASK_GLOBAL, 1, 1 };
+        Want m = { OF_TAG('l', 't', 'r', 'm'), OF_MASK_GLOBAL, 1, 1 };
+        out[n++] = a;
+        out[n++] = m;
+    }
+    last_stage = 0;
+    for (i = 0; i < n; ++i)
+        if (out[i].stage > last_stage)
+            last_stage = out[i].stage;
+    if (!spec)
+        return n;
+    for (k = 0; k < spec->nfeatures && k < OF_MAX_FEATURES; ++k) {
+        const OFFeature *ft = &spec->features[k];
+        uint32_t ranged = spec->ranged_mask[k];
+        uint16_t value = (uint16_t)(ft->value > 0xFFFF ? 0xFFFF : ft->value);
+        for (i = 0; i < n; ++i)
+            if (out[i].tag == ft->tag)
+                break;
+        if (ranged) {
+            /* on where its mask is, which the shaper set */
+            if (i == n) {
+                Want w = { ft->tag, ranged, last_stage, value ? value : 1 };
+                out[n++] = w;
+            } else {
+                out[i].mask = ranged;
+                if (value)
+                    out[i].value = value;
+            }
+        } else if (!ft->value) {
+            if (i < n) {
+                memmove(&out[i], &out[i + 1], (n - i - 1) * sizeof(Want));
+                n--;
+            }
+        } else if (i < n) {
+            out[i].value = value;
+        } else {
+            Want w = { ft->tag, OF_MASK_GLOBAL, last_stage, value };
+            out[n++] = w;
+        }
+    }
+    return n;
+}
+
+int of_layout_default_feature(const OFLayoutSpec *spec, uint32_t tag)
+{
+    Want w[MAX_WANTS];
+    OFLayoutSpec bare = *spec;
+    size_t n, i;
+    bare.nfeatures = 0;
+    n = make_wants(&bare, 0, w);
+    for (i = 0; i < n; ++i)
+        if (w[i].tag == tag)
+            return 1;
+    n = make_wants(&bare, 1, w);
+    for (i = 0; i < n; ++i)
+        if (w[i].tag == tag)
+            return 1;
+    return 0;
+}
+
+/* the language system of the script for lang (its default when lang is 0
+ * or it has none for it), or the default one of DFLT, dflt or latn when
+ * the font has none for the script; 0 when none of them */
+static uint32_t langsys(const Tab *t, uint32_t script_tag, uint32_t lang_tag)
+{
+    uint32_t sl = r16(t, 4), n = r16(t, sl), k, i, j;
     const uint32_t tries[4] = { script_tag, OF_TAG('D', 'F', 'L', 'T'), OF_TAG('d', 'f', 'l', 't'), OF_TAG('l', 'a', 't', 'n') };
     if (!sl)
         return 0;
@@ -242,13 +362,17 @@ static uint32_t langsys(const Tab *t, uint32_t script_tag)
         for (i = 0; i < n; ++i)
             if (r32(t, sl + 2 + 6 * i) == tries[k]) {
                 uint32_t s = sl + r16(t, sl + 2 + 6 * i + 4);
-                uint32_t def = r16(t, s);
+                uint32_t def = r16(t, s), nl = r16(t, s + 2);
+                if (lang_tag)
+                    for (j = 0; j < nl; ++j)
+                        if (r32(t, s + 4 + 6 * j) == lang_tag)
+                            return s + r16(t, s + 4 + 6 * j + 4);
                 return def ? s + def : 0;
             }
     return 0;
 }
 
-static void plan_add(Plan *p, uint32_t index, uint32_t mask, uint8_t stage)
+static void plan_add(Plan *p, uint32_t index, uint32_t mask, uint8_t stage, uint16_t value)
 {
     uint32_t i;
     for (i = 0; i < p->n; ++i)
@@ -260,6 +384,7 @@ static void plan_add(Plan *p, uint32_t index, uint32_t mask, uint8_t stage)
         p->l[p->n].index = (uint16_t)index;
         p->l[p->n].mask = mask;
         p->l[p->n].stage = stage;
+        p->l[p->n].value = value;
         p->n++;
     }
 }
@@ -273,9 +398,10 @@ static int planned_cmp(const void *a, const void *b)
 }
 
 /* the lookups of the wanted features, by stage then lookup index */
-static void make_plan(const Tab *t, uint32_t script_tag, const Want *w, size_t nw, Plan *p, uint32_t only_tag)
+static void make_plan(const Tab *t, uint32_t script_tag, uint32_t lang_tag, const Want *w, size_t nw,
+                      Plan *p, uint32_t only_tag)
 {
-    uint32_t ls = langsys(t, script_tag), fl = r16(t, 6), nf, req, i, k;
+    uint32_t ls = langsys(t, script_tag, lang_tag), fl = r16(t, 6), nf, req, i, k;
     p->n = 0;
     if (!ls || !fl)
         return;
@@ -301,6 +427,7 @@ static void make_plan(const Tab *t, uint32_t script_tag, const Want *w, size_t n
             required.tag = tag;
             required.mask = OF_MASK_GLOBAL;
             required.stage = 1;
+            required.value = 1;
             want = &required;
         } else {
             for (k = 0; k < nw; ++k)
@@ -311,7 +438,7 @@ static void make_plan(const Tab *t, uint32_t script_tag, const Want *w, size_t n
             continue;
         nl = r16(t, ft + 2);
         for (j = 0; j < nl; ++j)
-            plan_add(p, r16(t, ft + 4 + 2 * j), want->mask, want->stage);
+            plan_add(p, r16(t, ft + 4 + 2 * j), want->mask, want->stage, want->value);
     }
     qsort(p->l, p->n, sizeof p->l[0], planned_cmp);
 }
@@ -328,6 +455,8 @@ typedef struct Ctx {
     OFShBuf *b;
     int gpos;
     uint32_t mask;              /* the lookup's feature mask */
+    uint32_t value;             /* its feature's value */
+    int rtl;                    /* the run is right to left (still in logical order) */
     uint32_t flag;              /* its lookup flag */
     uint32_t mark_set;          /* its mark filtering set */
     int depth;
@@ -628,7 +757,13 @@ static int gsub_alternate(Ctx *c, uint32_t st, uint32_t i)
     set = st + r16(t, st + 6 + 2 * k);
     if (!r16(t, set))
         return 0;
-    set_glyph(c, i, r16(t, set + 2));   /* the feature's value 1: the first */
+    /* the feature's value: 1 the first alternate, 2 the second */
+    {
+        uint32_t na = r16(t, set), v = c->value ? c->value : 1;
+        if (v > na)
+            return 0;
+        set_glyph(c, i, r16(t, set + 2 * v));
+    }
     return 1;
 }
 
@@ -1029,14 +1164,31 @@ static int gpos_cursive(Ctx *c, uint32_t st, uint32_t i)
         return 0;
     anchor(c, st + exit_off, &ex, &ey);
     anchor(c, st + entry_off, &nx, &ny);
-    /* left to right: the first glyph's advance ends at its exit, the next
-     * begins at its entry, and hangs from the first vertically */
-    c->b->g[i].xa = round_fine(ex) + c->b->g[i].xo;
-    c->b->g[j].xa -= round_fine(nx) + c->b->g[j].xo;
-    c->b->g[j].xo = 0;
-    c->b->g[j].yo = round_fine(ey - ny);
-    c->b->g[j].attach_kind = OF_ATTACH_CURSIVE;
-    c->b->g[j].attach_to = (int32_t)i;
+    if (!c->rtl) {
+        /* left to right: the first glyph's advance ends at its exit, the
+         * next begins at its entry */
+        c->b->g[i].xa = round_fine(ex) + c->b->g[i].xo;
+        c->b->g[j].xa -= round_fine(nx) + c->b->g[j].xo;
+        c->b->g[j].xo = 0;
+    } else {
+        /* right to left (logical order): the first glyph's advance begins
+         * at its exit, the next ends at its entry */
+        int32_t d = round_fine(ex) + c->b->g[i].xo;
+        c->b->g[i].xa -= d;
+        c->b->g[i].xo -= d;
+        c->b->g[j].xa = round_fine(nx) + c->b->g[j].xo;
+    }
+    if (c->flag & LF_RIGHT_TO_LEFT) {
+        /* the first hangs from the next vertically */
+        c->b->g[i].yo = round_fine(ny - ey);
+        c->b->g[i].attach_kind = OF_ATTACH_CURSIVE;
+        c->b->g[i].attach_to = (int32_t)j;
+    } else {
+        /* the next hangs from the first vertically */
+        c->b->g[j].yo = round_fine(ey - ny);
+        c->b->g[j].attach_kind = OF_ATTACH_CURSIVE;
+        c->b->g[j].attach_to = (int32_t)i;
+    }
     of_layout_unsafe(c->b, (long)i, j);
     return 1;
 }
@@ -1224,7 +1376,7 @@ static int apply_lookup(Ctx *c, uint32_t index, uint32_t i, uint32_t *next)
 }
 
 /* a whole lookup over the run */
-static void run_lookup(Ctx *c, uint32_t index, uint32_t mask)
+static void run_lookup(Ctx *c, uint32_t index, uint32_t mask, uint32_t value)
 {
     uint32_t lk, type, i;
     if (!lookup_at(c, index, &lk))
@@ -1233,6 +1385,7 @@ static void run_lookup(Ctx *c, uint32_t index, uint32_t mask)
     if (type == (c->gpos ? 9u : 7u) && r16(&c->t, lk + 4))
         type = r16(&c->t, lk + r16(&c->t, lk + 6) + 2);
     c->mask = mask;
+    c->value = value;
     if (!c->gpos && type == 8) {
         /* reverse chaining: from the end */
         for (i = c->b->n; i-- > 0;) {
@@ -1252,10 +1405,12 @@ static void run_lookup(Ctx *c, uint32_t index, uint32_t mask)
     }
 }
 
-int of_layout_substitute(const OFFont *f, OFShBuf *b, uint32_t script_tag)
+int of_layout_substitute(const OFFont *f, OFShBuf *b, const OFLayoutSpec *spec)
 {
     Ctx c;
     Plan *p;
+    Want w[MAX_WANTS];
+    size_t nw;
     uint32_t k;
     if (!f->gsub.len)
         return OF_OK;
@@ -1267,39 +1422,44 @@ int of_layout_substitute(const OFFont *f, OFShBuf *b, uint32_t script_tag)
     c.t = table_of(f, &f->gsub);
     gdef_open(f, &c.gdef);
     c.b = b;
-    make_plan(&c.t, script_tag, gsub_wants, sizeof gsub_wants / sizeof gsub_wants[0], p, 0);
+    c.rtl = spec->rtl;
+    nw = make_wants(spec, 0, w);
+    make_plan(&c.t, spec->script_tag, spec->lang_tag, w, nw, p, 0);
     for (k = 0; k < p->n; ++k)
-        run_lookup(&c, p->l[k].index, p->l[k].mask);
+        run_lookup(&c, p->l[k].index, p->l[k].mask, p->l[k].value);
     free(p);
     return b->failed ? OF_ERR_MEMORY : OF_OK;
 }
 
-static int has_feature(const OFFont *f, const OFTable *table, const Want *w, size_t nw,
-                       uint32_t script_tag, uint32_t feature)
+static int has_feature(const OFFont *f, const OFTable *table, int gpos,
+                       const OFLayoutSpec *spec, uint32_t feature)
 {
     Tab t;
     Plan *p;
+    Want w[MAX_WANTS];
+    size_t nw;
     int has;
     if (!table->len)
         return 0;
+    nw = make_wants(spec, gpos, w);
     p = (Plan *)malloc(sizeof(*p));
     if (!p)
         return 0;
     t = table_of(f, table);
-    make_plan(&t, script_tag, w, nw, p, feature);
+    make_plan(&t, spec->script_tag, spec->lang_tag, w, nw, p, feature);
     has = p->n > 0;
     free(p);
     return has;
 }
 
-int of_layout_has_gpos_feature(const OFFont *f, uint32_t script_tag, uint32_t feature)
+int of_layout_has_gpos_feature(const OFFont *f, const OFLayoutSpec *spec, uint32_t feature)
 {
-    return has_feature(f, &f->gpos, gpos_wants, sizeof gpos_wants / sizeof gpos_wants[0], script_tag, feature);
+    return has_feature(f, &f->gpos, 1, spec, feature);
 }
 
-int of_layout_has_gsub_feature(const OFFont *f, uint32_t script_tag, uint32_t feature)
+int of_layout_has_gsub_feature(const OFFont *f, const OFLayoutSpec *spec, uint32_t feature)
 {
-    return has_feature(f, &f->gsub, gsub_wants, sizeof gsub_wants / sizeof gsub_wants[0], script_tag, feature);
+    return has_feature(f, &f->gsub, 0, spec, feature);
 }
 
 /* ---- 'kern' ---- */
@@ -1375,10 +1535,23 @@ static void kern_table(const OFFont *f, OFShBuf *b, int32_t scale)
     }
 }
 
-int of_layout_position(const OFFont *f, OFShBuf *b, uint32_t script_tag, uint32_t ppem)
+/* whether the program turned the feature off over the whole text */
+static int turned_off(const OFLayoutSpec *spec, uint32_t tag)
+{
+    uint32_t k;
+    int off = 0;
+    for (k = 0; k < spec->nfeatures && k < OF_MAX_FEATURES; ++k)
+        if (spec->features[k].tag == tag && !spec->ranged_mask[k])
+            off = spec->features[k].value == 0;
+    return off;
+}
+
+int of_layout_position(const OFFont *f, OFShBuf *b, const OFLayoutSpec *spec, uint32_t ppem)
 {
     Ctx c;
     Plan *p;
+    Want w[MAX_WANTS];
+    size_t nw;
     uint32_t k, i;
     int has_kern = 0;
     memset(&c, 0, sizeof c);
@@ -1387,19 +1560,21 @@ int of_layout_position(const OFFont *f, OFShBuf *b, uint32_t script_tag, uint32_
     c.ppem = ppem;
     c.scale = of_scale_16_16(f->units_per_em, ppem);
     c.gpos = 1;
+    c.rtl = spec->rtl;
     gdef_open(f, &c.gdef);
     if (f->gpos.len) {
         p = (Plan *)malloc(sizeof(*p));
         if (!p)
             return OF_ERR_MEMORY;
         c.t = table_of(f, &f->gpos);
-        make_plan(&c.t, script_tag, gpos_wants, sizeof gpos_wants / sizeof gpos_wants[0], p, 0);
+        nw = make_wants(spec, 1, w);
+        make_plan(&c.t, spec->script_tag, spec->lang_tag, w, nw, p, 0);
         for (k = 0; k < p->n; ++k)
-            run_lookup(&c, p->l[k].index, p->l[k].mask);
+            run_lookup(&c, p->l[k].index, p->l[k].mask, p->l[k].value);
         free(p);
-        has_kern = of_layout_has_gpos_feature(f, script_tag, OF_TAG('k', 'e', 'r', 'n'));
+        has_kern = of_layout_has_gpos_feature(f, spec, OF_TAG('k', 'e', 'r', 'n'));
     }
-    if (!has_kern && f->kern.len)
+    if (!has_kern && f->kern.len && !turned_off(spec, OF_TAG('k', 'e', 'r', 'n')))
         kern_table(f, b, c.scale);
     /* marks take no room of their own */
     for (i = 0; i < b->n; ++i)
@@ -1407,19 +1582,32 @@ int of_layout_position(const OFFont *f, OFShBuf *b, uint32_t script_tag, uint32_
             b->g[i].xa = 0;
             b->g[i].ya = 0;
         }
-    /* a mark sits where its base's anchor is: back over the advances
-     * between them */
+    /* a mark sits where its base's anchor is: left to right, back over
+     * the advances between them; right to left (the run still in logical
+     * order, to be reversed), forward over the advances after its base up
+     * to itself */
     for (i = 0; i < b->n; ++i) {
         OFShGlyph *x = &b->g[i];
         if (x->attach_kind == OF_ATTACH_MARK && x->attach_to >= 0 && (uint32_t)x->attach_to < i) {
             uint32_t j = (uint32_t)x->attach_to, m;
             x->xo += b->g[j].xo;
             x->yo += b->g[j].yo;
-            for (m = j; m < i; ++m)
-                x->xo -= b->g[m].xa;
+            if (!spec->rtl)
+                for (m = j; m < i; ++m)
+                    x->xo -= b->g[m].xa;
+            else
+                for (m = j + 1; m <= i; ++m)
+                    x->xo += b->g[m].xa;
         } else if (x->attach_kind == OF_ATTACH_CURSIVE && x->attach_to >= 0 && (uint32_t)x->attach_to < i) {
             x->yo += b->g[x->attach_to].yo;
         }
+    }
+    /* a cursive chain hung the other way (the lookup's right-to-left
+     * flag): each from the one after it, from the end */
+    for (i = b->n; i-- > 0;) {
+        OFShGlyph *x = &b->g[i];
+        if (x->attach_kind == OF_ATTACH_CURSIVE && x->attach_to > (int32_t)i && (uint32_t)x->attach_to < b->n)
+            x->yo += b->g[x->attach_to].yo;
     }
     return b->failed ? OF_ERR_MEMORY : OF_OK;
 }

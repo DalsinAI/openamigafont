@@ -73,7 +73,7 @@ static void compare(Face *face, hb_font_t *hb, const char *name, const char *tex
     hb_glyph_position_t *pos;
     unsigned n = 0, i;
     OFShBuf b;
-    unsigned script = OF_SCRIPT_UNKNOWN;
+    OFRunProps props = { OF_SCRIPT_UNKNOWN, 0, 0, OF_DIR_AUTO, NULL, 0 };
     int differs = 0, only_notdef = 1;
 
     hb_buffer_add_utf8(buf, text, (int)len, 0, (int)len);
@@ -82,7 +82,7 @@ static void compare(Face *face, hb_font_t *hb, const char *name, const char *tex
     info = hb_buffer_get_glyph_infos(buf, &n);
     pos = hb_buffer_get_glyph_positions(buf, &n);
     memset(&b, 0, sizeof b);
-    of_shape_text(&face->font, face->ppem, text, len, 0, len, &script, &b);
+    of_shape_text(&face->font, face->ppem, text, len, 0, len, &props, &b);
     runs++;
     if (HB_DIRECTION_IS_BACKWARD(hb_buffer_get_direction(buf))) {
         rtl++;

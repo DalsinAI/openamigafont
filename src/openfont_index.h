@@ -78,4 +78,10 @@ void of_index_configure(OFIndex *ix, const char *aliases, const char *fallbacks)
 OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
                       uint16_t weight, int italic, int with_fallbacks, int *error);
 
+/* Opens a face that has a glyph for codepoint: the default fallback
+ * chain's families first, then every family's best face for weight and
+ * slant, in the index's order. NULL (*error OF_ERR_FONT) when none has it. */
+OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint,
+                           uint16_t weight, int italic, int *error);
+
 #endif
