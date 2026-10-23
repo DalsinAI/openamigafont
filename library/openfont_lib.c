@@ -1005,13 +1005,18 @@ static ULONG do_method(Object *o, Msg msg)
     return CallHookPkt((struct Hook *)OCLASS(o), o, msg);
 }
 
-static LONG decode_png(const UBYTE *png, ULONG length, ULONG width, ULONG height, ULONG **pixels)
+/* The steps OF_GlyphColorBitmap reports in cb_Left when the datatype path
+ * fails, with IoErr() in cb_Top. */
+enum { COLOR_STEP_DATATYPES = 1, COLOR_STEP_OBJECT, COLOR_STEP_HEADER, COLOR_STEP_READ };
+
+/* The PNG from memory (DTST_MEMORY), or, for a png.datatype that reads only
+ * files, from a file in T: that goes when the object does. */
+static Object *png_object(const UBYTE *png, ULONG length, char *path, ULONG pathSize)
 {
-    struct pdtBlitPixelArray read;
-    struct BitMapHeader *bmh = NULL;
     Object *o;
-    ULONG *buf;
-    *pixels = NULL;
+    BPTR fh;
+    LONG written;
+    path[0] = 0;
     o = NewDTObject(NULL,
                     DTA_SourceType, DTST_MEMORY,
                     DTA_SourceAddress, (ULONG)png,
@@ -1020,18 +1025,69 @@ static LONG decode_png(const UBYTE *png, ULONG length, ULONG width, ULONG height
                     PDTA_DestMode, PMODE_V43,
                     PDTA_Remap, FALSE,
                     TAG_DONE);
-    if (!o)
+    if (o)
+        return o;
+    if (pathSize < 32)
+        return NULL;
+    {
+        static const char hex[] = "0123456789abcdef";
+        ULONG task = (ULONG)FindTask(NULL);
+        int i;
+        strcpy(path, "T:openfont-00000000.png");
+        for (i = 0; i < 8; ++i)
+            path[11 + i] = hex[(task >> (28 - 4 * i)) & 15];
+    }
+    if (!(fh = Open((CONST_STRPTR)path, MODE_NEWFILE)))
+        return NULL;
+    written = Write(fh, (APTR)png, length);
+    Close(fh);
+    if (written == (LONG)length)
+        o = NewDTObject((APTR)path,
+                        DTA_SourceType, DTST_FILE,
+                        DTA_GroupID, GID_PICTURE,
+                        PDTA_DestMode, PMODE_V43,
+                        PDTA_Remap, FALSE,
+                        TAG_DONE);
+    if (!o) {
+        LONG error = IoErr();
+        DeleteFile((CONST_STRPTR)path);
+        path[0] = 0;
+        SetIoErr(error);
+    }
+    return o;
+}
+
+static VOID png_dispose(Object *o, const char *path)
+{
+    DisposeDTObject(o);
+    if (path[0])
+        DeleteFile((CONST_STRPTR)path);
+}
+
+static LONG decode_png(const UBYTE *png, ULONG length, ULONG width, ULONG height, ULONG **pixels, LONG *step)
+{
+    struct pdtBlitPixelArray read;
+    struct BitMapHeader *bmh = NULL;
+    char path[40];
+    Object *o;
+    ULONG *buf;
+    ULONG done, p;
+    *pixels = NULL;
+    *step = COLOR_STEP_OBJECT;
+    if (!(o = png_object(png, length, path, sizeof path)))
         return OF_ERR_EXEC;
+    *step = COLOR_STEP_HEADER;
     if (GetDTAttrs(o, PDTA_BitMapHeader, (ULONG)&bmh, TAG_DONE) != 1 || !bmh
         || bmh->bmh_Width != width || bmh->bmh_Height != height) {
-        DisposeDTObject(o);
+        png_dispose(o, path);
         return OF_ERR_FONT;
     }
     buf = (ULONG *)AllocVec(width * height * 4, MEMF_ANY | MEMF_CLEAR);
     if (!buf) {
-        DisposeDTObject(o);
+        png_dispose(o, path);
         return OF_ERR_MEMORY;
     }
+    *step = COLOR_STEP_READ;
     read.MethodID = PDTM_READPIXELARRAY;
     read.pbpa_PixelData = buf;
     read.pbpa_PixelFormat = PBPAFMT_ARGB;
@@ -1040,12 +1096,16 @@ static LONG decode_png(const UBYTE *png, ULONG length, ULONG width, ULONG height
     read.pbpa_Top = 0;
     read.pbpa_Width = width;
     read.pbpa_Height = height;
-    if (!do_method(o, (Msg)&read)) {
+    done = do_method(o, (Msg)&read);
+    /* Some picture.datatype versions return 0 from a read that worked, so
+     * pixels in the buffer count as success too. */
+    for (p = 0; !done && p < width * height; ++p)
+        done = buf[p] != 0;
+    png_dispose(o, path);
+    if (!done) {
         FreeVec(buf);
-        DisposeDTObject(o);
         return OF_ERR_EXEC;
     }
-    DisposeDTObject(o);
     *pixels = buf;
     return OF_OK;
 }
@@ -1055,7 +1115,7 @@ static LONG L_GlyphColorBitmap(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(
 {
     struct FaceArgs a;
     OFColorPng png;
-    LONG rc;
+    LONG rc, step;
     if (!bitmap)
         return OF_ERR_ARGUMENT;
     memset(bitmap, 0, sizeof *bitmap);
@@ -1076,10 +1136,15 @@ static LONG L_GlyphColorBitmap(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(
         DataTypesBase = OpenLibrary((CONST_STRPTR)"datatypes.library", 44);
     }
     ReleaseSemaphore(&b->lock);
-    if (!DataTypesBase)
+    if (!DataTypesBase) {
+        bitmap->cb_Left = COLOR_STEP_DATATYPES;
         return OF_ERR_EXEC;
-    if ((rc = decode_png(png.png, png.length, png.width, png.height, &bitmap->cb_Pixels)) != OF_OK)
+    }
+    if ((rc = decode_png(png.png, png.length, png.width, png.height, &bitmap->cb_Pixels, &step)) != OF_OK) {
+        bitmap->cb_Left = step;
+        bitmap->cb_Top = IoErr();
         return rc;
+    }
     bitmap->cb_Width = png.width;
     bitmap->cb_Height = png.height;
     bitmap->cb_Left = png.left;

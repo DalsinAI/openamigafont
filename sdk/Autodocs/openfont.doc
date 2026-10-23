@@ -469,7 +469,9 @@ openfont.library/OF_GlyphColorBitmap         openfont.library/OF_GlyphColorBitma
 	(Apple's). The image comes from the strike nearest ppem: the
 	smallest at least ppem, else the largest (ppem 0: the largest). It
 	is decoded through the PNG datatype (datatypes.library 44 or newer,
-	opened on first use), with no PNG code in the library.
+	opened on first use), with no PNG code in the library: from memory
+	(DTST_MEMORY), or, when the PNG datatype reads only files, from a
+	file in T: that is deleted afterwards.
 
 	cb_Pixels holds cb_Width x cb_Height pixels, 0xAARRGGBB, not
 	premultiplied. cb_Left and cb_Top place the image's top-left corner
@@ -486,7 +488,10 @@ openfont.library/OF_GlyphColorBitmap         openfont.library/OF_GlyphColorBitma
 	decoded); OFERR_RANGE for a glyph the face doesn't have;
 	OFERR_EXEC when datatypes.library or the PNG datatype is missing or
 	cannot decode it; OFERR_MEMORY; OFERR_NOTPROCESS from a plain task
-	(datatypes read through DOS). On failure cb_Pixels is NULL.
+	(datatypes read through DOS). On failure cb_Pixels is NULL; after
+	OFERR_EXEC, cb_Left says which step failed (1 opening
+	datatypes.library, 2 making the picture object, 4 reading its
+	pixels) and cb_Top holds IoErr().
 
 openfont.library/OF_GlyphExtents               openfont.library/OF_GlyphExtents
 
