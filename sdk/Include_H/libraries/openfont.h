@@ -21,6 +21,7 @@
 #define OPENFONT_VERSION 1
 #define OPENFONT_REVISION_TEXTFONT 2   /* lib_Revision with OF_OpenTextFont */
 #define OPENFONT_REVISION_LAYOUT 3     /* lib_Revision with OF_ShapeA and the calls after it */
+#define OPENFONT_REVISION_COLOR 4      /* lib_Revision with OF_GlyphColorBitmap */
 
 /* A face (one font of a file) and a compiled glyph cache: opaque. */
 struct OFFace;
@@ -152,6 +153,19 @@ struct OFOutline {
     ULONG ol_MaxPoints;         /* points: pairs, so ol_Points holds twice as many LONGs */
     ULONG ol_NumVerbs;
     ULONG ol_NumPoints;
+};                              /* 24 bytes */
+
+/* A colour glyph (an emoji), for OF_GlyphColorBitmap: the font's PNG
+ * image for it, from the strike nearest the size asked, decoded through
+ * the PNG datatype. Draw it scaled by your size / cb_PPEM. */
+struct OFColorBitmap {
+    ULONG *cb_Pixels;           /* ARGB (0xAARRGGBB, not premultiplied), cb_Width per row;
+                                   free with OF_FreeColorBitmap */
+    ULONG cb_Width;
+    ULONG cb_Height;
+    LONG cb_Left;               /* the image's left edge from the pen, in the strike's pixels */
+    LONG cb_Top;                /* its top edge above the baseline */
+    ULONG cb_PPEM;              /* the strike's pixels per em */
 };                              /* 24 bytes */
 
 #define OFPV_MOVE  0    /* one point */

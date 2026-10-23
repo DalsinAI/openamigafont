@@ -1198,6 +1198,17 @@ int of_face_glyph_outline(OFFace *face, uint32_t glyph_id,
     return (o.nverbs > verb_capacity || o.npoints > point_capacity) ? OF_ERR_BUFFER : OF_OK;
 }
 
+int of_face_color_png(OFFace *face, uint32_t glyph_id, uint32_t ppem, OFColorPng *out)
+{
+    if (!face || !out)
+        return OF_ERR_ARGUMENT;
+    if (glyph_id >= face->font.num_glyphs) {
+        memset(out, 0, sizeof *out);
+        return OF_ERR_RANGE;
+    }
+    return of_font_color_png(&face->font, glyph_id, ppem, out);
+}
+
 const uint8_t *of_face_table(OFFace *face, uint32_t tag, size_t *length)
 {
     const OFFont *f;

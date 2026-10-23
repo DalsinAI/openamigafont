@@ -1,6 +1,6 @@
 /* OpenFontLibTest: openfont.library's calls on AmigaOS 3.2, for a lab.
  *
- *   OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K
+ *   OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K,COLOR/K
  *
  * FONT is DejaVuSans.ttf: the shaping and raster hash, and the layout
  * hash of revision 3's calls, must be the ones the host's
@@ -12,6 +12,10 @@
  * OUTLINE is an outline .font in FONTS: whose .otag names a TrueType or
  * OpenType file (OT_Spec1), for OF_OpenTextFont at a size it has no bitmap
  * for; without it only bitmap fonts are opened (topaz.font).
+ * COLOR is a colour font with PNG emoji (Noto Color Emoji, CBDT, or an
+ * sbix font): revision 4's OF_GlyphColorBitmap decodes U+1F600 through the
+ * PNG datatype and prints its pixels' hash (ARGB bytes, FNV-1a), which
+ * tests/ref/color_png_hash.py gives on the host for the same font.
  *
  * Start it with a 4 KB stack: the library works on its own.
  *
@@ -89,7 +93,7 @@ int main(void)
 {
     static const char text[] = "Office AVWa fi \xC3\xA9";
     static const char snow[] = "snow \xE2\x98\x83!";
-    LONG args[4] = { 0, 0, 0, 0 };
+    LONG args[5] = { 0, 0, 0, 0, 0 };
     struct RDArgs *rda;
     struct OFFace *face, *found;
     struct OFFaceInfo info;
@@ -98,9 +102,9 @@ int main(void)
     ULONG n, i, hash = 2166136261UL;
     LONG advance, err;
 
-    rda = ReadArgs((CONST_STRPTR)"FONT/A,FONTDIR/A,CACHE,OUTLINE/K", args, NULL);
+    rda = ReadArgs((CONST_STRPTR)"FONT/A,FONTDIR/A,CACHE,OUTLINE/K,COLOR/K", args, NULL);
     if (!rda) {
-        printf("usage: OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K\n");
+        printf("usage: OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K,COLOR/K\n");
         return 20;
     }
     OpenFontBase = OpenLibrary((CONST_STRPTR)"openfont.library", 1);
@@ -313,6 +317,44 @@ int main(void)
         check(found != NULL, "OF_FindFace(OFA_Exact) of an alias");
         if (found)
             OF_CloseFace(found);
+    }
+
+    /* colour glyphs: an emoji's PNG through the PNG datatype */
+    if (OpenFontBase->lib_Revision >= OPENFONT_REVISION_COLOR) {
+        struct OFColorBitmap cb;
+        face = OF_OpenFace((CONST_STRPTR)args[0], TAG_END);
+        if (face) {
+            check(OF_GlyphColorBitmap(face, OF_CharIndex(face, 'A'), 16, &cb) == OFERR_FONT && !cb.cb_Pixels,
+                  "OF_GlyphColorBitmap: a plain font's A has none");
+            OF_CloseFace(face);
+        }
+        if (args[4]) {
+            face = OF_OpenFace((CONST_STRPTR)args[4], TAG_END);
+            check(face != NULL, "the colour font opens");
+            if (face) {
+                ULONG ch = 2166136261UL, p, alpha = 0;
+                LONG rc = OF_GlyphColorBitmap(face, OF_CharIndex(face, 0x1F600), 20, &cb);
+                printf("     U+1F600: rc %ld, %lux%lu, left %ld top %ld, strike %lu\n", (long)rc,
+                       (unsigned long)cb.cb_Width, (unsigned long)cb.cb_Height, (long)cb.cb_Left,
+                       (long)cb.cb_Top, (unsigned long)cb.cb_PPEM);
+                check(rc == OFERR_OK && cb.cb_Pixels && cb.cb_Width && cb.cb_Height && cb.cb_PPEM,
+                      "OF_GlyphColorBitmap(U+1F600) through the PNG datatype");
+                for (p = 0; rc == OFERR_OK && p < cb.cb_Width * cb.cb_Height; ++p) {
+                    UBYTE px[4];
+                    px[0] = cb.cb_Pixels[p] >> 24;
+                    px[1] = cb.cb_Pixels[p] >> 16;
+                    px[2] = cb.cb_Pixels[p] >> 8;
+                    px[3] = cb.cb_Pixels[p];
+                    ch = hash_bytes(ch, px, 4);
+                    alpha += px[0] != 0;
+                }
+                printf("     pixels hash=%08lx, %lu not transparent\n", (unsigned long)ch, (unsigned long)alpha);
+                check(rc != OFERR_OK || alpha > cb.cb_Width * cb.cb_Height / 4, "the emoji has ink");
+                OF_FreeColorBitmap(&cb);
+                check(!cb.cb_Pixels, "OF_FreeColorBitmap");
+                OF_CloseFace(face);
+            }
+        }
     }
 
     /* a plain task gets OFERR_NOTPROCESS, and the library stays usable */

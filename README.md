@@ -9,7 +9,7 @@ OpenFont reads, shapes and draws fonts with its own code, written from the
 published specifications (the OpenType specification, the Unicode
 Standard).
 
-Current phase: **the resident library, a preview**. `openfont.library` 1.3 is
+Current phase: **the resident library, a preview**. `openfont.library` 1.4 is
 OpenFont for AmigaOS 3.2 on the 68040, with its own font reader, rasteriser
 and shaper inside it. It finds fonts by family through its own font index, and a
 face falls back to others for the characters it has no glyphs for. Its calls
@@ -364,6 +364,18 @@ also the first library with OpenFont's own shaper on main: HarfBuzz is gone
 from it, and it went from 1,054,068 bytes (1.2) to 252,208. Check
 `lib_Revision` against `OPENFONT_REVISION_LAYOUT` (3) before calling them.
 
+Revision 4 (1.4) adds colour glyphs: `OF_GlyphColorBitmap` gives an emoji's
+image from fonts that keep their emoji as PNG images, CBDT/CBLC (Google's,
+such as Noto Color Emoji) and sbix (Apple's), from the strike nearest the
+size asked, as ARGB pixels; `OF_FreeColorBitmap` frees them (-216 and
+-222). The PNG is decoded through the PNG datatype (datatypes.library 44 or
+newer): there is no PNG code in the library, and a program drawing emoji
+needs no libpng either. The core's `of_face_color_png` gives the PNG itself;
+the strike chosen and the image are HarfBuzz's for every glyph of Noto
+Color Emoji and of HarfBuzz's own CBDT and sbix test fonts. The library
+grows by 4,332 bytes (252,368 to 256,700). Check `lib_Revision` against
+`OPENFONT_REVISION_COLOR` (4) before calling them.
+
 ### Building it
 
 [amiga/build-library.sh](amiga/build-library.sh) builds it with OpenAmigaGCC
@@ -389,7 +401,7 @@ is the same build for a Cradle stove, which sets `STOVE` and `OUT`.
 Copy `openfont.library` to `LIBS:`, then, from a shell with a 4 KB stack:
 
 ```text
-OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K
+OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K,COLOR/K
 ```
 
 `FONT` is `DejaVuSans.ttf`, `FONTDIR` a folder with the DejaVu and Liberation
@@ -400,7 +412,10 @@ index, the aliases, the snowman from a fallback and `OFERR_NOTPROCESS` from a
 plain task, then `OF_OpenTextFont` on topaz at 8, 11 and 23 (scaled), and on
 `OUTLINE` (an outline `.font` in `FONTS:` whose `.otag` names a TrueType or
 OpenType file) at 29. It ends with `OPENFONTLIB PASS`. Since 1.3 it also checks revision 3's
-calls against the host's `OPENFONT LAYOUT` hash (tests/test_openfont.c). On
+calls against the host's `OPENFONT LAYOUT` hash (tests/test_openfont.c). Since
+1.4, given `COLOR` (Noto Color Emoji), it decodes U+1F600 through the PNG
+datatype and prints the pixels' hash, which `tests/ref/color_png_hash.py`
+works out on the host for the same font file. On
 lab t4-a (17 Oct 2026) it stopped before its first line of output; the
 library then had HarfBuzz inside, whose maths went through libnix's libm
 stubs and their unopened math library bases (openamigafont #14). With the
