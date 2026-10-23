@@ -52,6 +52,8 @@ struct OFFace * OF_OpenFaceMemory(CONST_APTR data, ULONG size, Tag tag1, ...);
 struct OFFace * OF_FindFaceForCharA(ULONG codepoint, CONST struct TagItem * tags);
 struct OFFace * OF_FindFaceForChar(ULONG codepoint, Tag tag1, ...);
 LONG OF_GlyphAdvancePx(struct OFFace * face, ULONG glyph);
+LONG OF_GlyphColorBitmap(struct OFFace * face, ULONG glyph, ULONG ppem, struct OFColorBitmap * bitmap);
+VOID OF_FreeColorBitmap(struct OFColorBitmap * bitmap);
 
 #ifdef __cplusplus
 }

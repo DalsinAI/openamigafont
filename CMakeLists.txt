@@ -56,6 +56,14 @@ if(OPENFONT_DEJAVU_DIR AND OPENFONT_LIBERATION_DIR)
              ${OPENFONT_DEJAVU_DIR} ${OPENFONT_LIBERATION_DIR})
 endif()
 
+# Colour glyphs (CBDT and sbix PNG images), with Noto Color Emoji.
+add_executable(test_color tests/test_color.c)
+target_link_libraries(test_color PRIVATE openfont)
+find_file(OPENFONT_COLOR_FONT NAMES NotoColorEmoji.ttf PATHS /usr/share/fonts/truetype/noto)
+if(OPENFONT_COLOR_FONT)
+    add_test(NAME openfont_color COMMAND test_color ${OPENFONT_COLOR_FONT} ${OPENFONT_TEST_FONT})
+endif()
+
 # The Unicode properties and the shaper; with DejaVu Sans, shaping too.
 add_executable(test_shape tests/test_shape.c)
 target_include_directories(test_shape PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

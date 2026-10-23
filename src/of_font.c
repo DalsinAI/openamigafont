@@ -209,6 +209,7 @@ static void find_tables(OFFont *f)
         case TAG('G', 'D', 'E', 'F'): t = &f->gdef; break;
         case TAG('C', 'O', 'L', 'R'): t = &f->colr; break;
         case TAG('C', 'B', 'D', 'T'): t = &f->cbdt; break;
+        case TAG('C', 'B', 'L', 'C'): t = &f->cblc; break;
         case TAG('s', 'b', 'i', 'x'): t = &f->sbix; break;
         case TAG('S', 'V', 'G', ' '): t = &f->svg; break;
         default: break;
@@ -1077,4 +1078,259 @@ unsigned of_font_style(const OFFont *f)
 int of_font_has_color(const OFFont *f)
 {
     return f->colr.len || f->cbdt.len || f->sbix.len || f->svg.len;
+}
+
+/* ---- colour bitmaps: PNG images in CBDT/CBLC and sbix ---- */
+
+/* The PNG's size from its IHDR, which must come first. 0 when data is no PNG. */
+static int png_size(const uint8_t *p, uint32_t len, uint32_t *width, uint32_t *height)
+{
+    static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    if (len < 24 || memcmp(p, sig, 8) || of_u32(p + 12) != TAG('I', 'H', 'D', 'R'))
+        return 0;
+    *width = of_u32(p + 16);
+    *height = of_u32(p + 20);
+    return *width && *height && *width <= 0x4000 && *height <= 0x4000;
+}
+
+/* The strike to use for ppem among n: the smallest at least ppem, else the
+ * largest (ppem 0: the largest). sizes[i] is strike i's ppem, 0 for one
+ * that can't be used. -1 with none. */
+static int pick_strike(const uint32_t *sizes, uint32_t n, uint32_t ppem)
+{
+    int best = -1;
+    uint32_t i;
+    if (!ppem)
+        ppem = UINT32_MAX;          /* the largest */
+    for (i = 0; i < n; ++i) {
+        if (!sizes[i])
+            continue;
+        if (best < 0) {
+            best = (int)i;
+            continue;
+        }
+        if (sizes[i] >= ppem) {
+            if (sizes[best] < ppem || sizes[i] < sizes[best])
+                best = (int)i;
+        } else if (sizes[best] < ppem && sizes[i] > sizes[best]) {
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+#define MAX_STRIKES 64
+
+/* The glyph's image in the CBDT strike: data offset and length in CBDT, and
+ * the big metrics an index of format 2 or 5 holds for image format 19. */
+static int cblc_find(const OFFont *f, uint32_t size_off, uint32_t glyph,
+                     uint32_t *image_off, uint32_t *image_len, uint16_t *image_format,
+                     const uint8_t **metrics)
+{
+    const OFTable *t = &f->cblc;
+    const uint8_t *d = f->data + t->off;
+    const uint8_t *s = d + size_off;
+    uint32_t array = of_u32(s), count = of_u32(s + 8), i;
+    if (glyph < of_u16(s + 40) || glyph > of_u16(s + 42) || !in_table(t, array, 8u * count))
+        return OF_ERR_FONT;
+    for (i = 0; i < count; ++i) {
+        const uint8_t *e = d + array + 8u * i;
+        uint16_t first = of_u16(e), last = of_u16(e + 2);
+        uint32_t sub = array + of_u32(e + 4), base, n = glyph - first, a = 0, b = 0;
+        uint16_t index_format;
+        const uint8_t *h;
+        if (glyph < first || glyph > last)
+            continue;
+        if (!in_table(t, sub, 8))
+            return OF_ERR_FONT;
+        h = d + sub;
+        index_format = of_u16(h);
+        *image_format = of_u16(h + 2);
+        base = of_u32(h + 4);
+        *metrics = NULL;
+        switch (index_format) {
+        case 1:
+            if (!in_table(t, sub + 8, 4u * (n + 2)))
+                return OF_ERR_FONT;
+            a = of_u32(h + 8 + 4 * n);
+            b = of_u32(h + 12 + 4 * n);
+            break;
+        case 2:
+            if (!in_table(t, sub + 8, 12))
+                return OF_ERR_FONT;
+            a = of_u32(h + 8) * n;
+            b = a + of_u32(h + 8);
+            *metrics = h + 12;
+            break;
+        case 3:
+            if (!in_table(t, sub + 8, 2u * (n + 2)))
+                return OF_ERR_FONT;
+            a = of_u16(h + 8 + 2 * n);
+            b = of_u16(h + 10 + 2 * n);
+            break;
+        case 4: {
+            uint32_t m, j;
+            if (!in_table(t, sub + 8, 4))
+                return OF_ERR_FONT;
+            m = of_u32(h + 8);
+            if (m > 0xFFFF || !in_table(t, sub + 12, 4u * (m + 1)))
+                return OF_ERR_FONT;
+            for (j = 0; j < m; ++j)
+                if (of_u16(h + 12 + 4 * j) == glyph)
+                    break;
+            if (j == m)
+                return OF_ERR_FONT;
+            a = of_u16(h + 14 + 4 * j);
+            b = of_u16(h + 18 + 4 * j);
+            break;
+        }
+        case 5: {
+            uint32_t m, j, size;
+            if (!in_table(t, sub + 8, 16))
+                return OF_ERR_FONT;
+            size = of_u32(h + 8);
+            *metrics = h + 12;
+            m = of_u32(h + 20);
+            if (m > 0xFFFF || !in_table(t, sub + 24, 2u * m))
+                return OF_ERR_FONT;
+            for (j = 0; j < m; ++j)
+                if (of_u16(h + 24 + 2 * j) == glyph)
+                    break;
+            if (j == m)
+                return OF_ERR_FONT;
+            a = size * j;
+            b = a + size;
+            break;
+        }
+        default:
+            return OF_ERR_FONT;
+        }
+        if (b <= a || base > UINT32_MAX - a)
+            return OF_ERR_FONT;
+        *image_off = base + a;
+        *image_len = b - a;
+        return OF_OK;
+    }
+    return OF_ERR_FONT;
+}
+
+static int cbdt_png(const OFFont *f, uint32_t glyph, uint32_t ppem, OFColorPng *out)
+{
+    const OFTable *t = &f->cblc;
+    const uint8_t *d = f->data + t->off, *p, *metrics;
+    uint32_t sizes[MAX_STRIKES], n, i, off, len, data_len;
+    uint16_t format;
+    int s;
+    if (!in_table(t, 0, 8) || !f->cbdt.len)
+        return OF_ERR_FONT;
+    n = of_u32(d + 4);
+    if (n > MAX_STRIKES)
+        n = MAX_STRIKES;
+    if (!in_table(t, 8, 48u * n))
+        return OF_ERR_FONT;
+    for (i = 0; i < n; ++i) {
+        const uint8_t *z = d + 8 + 48 * i;
+        /* only strikes that hold this glyph, in colour (32 bits) */
+        sizes[i] = (z[46] == 32 && glyph >= of_u16(z + 40) && glyph <= of_u16(z + 42)) ? z[44] : 0;
+    }
+    if ((s = pick_strike(sizes, n, ppem)) < 0)
+        return OF_ERR_FONT;
+    if (cblc_find(f, 8 + 48u * (uint32_t)s, glyph, &off, &len, &format, &metrics) != OF_OK
+        || !in_table(&f->cbdt, off, len))
+        return OF_ERR_FONT;
+    p = f->data + f->cbdt.off + off;
+    switch (format) {
+    case 17:                        /* small metrics, length, PNG */
+        if (len < 9)
+            return OF_ERR_FONT;
+        out->left = (int8_t)p[2];
+        out->top = (int8_t)p[3];
+        data_len = of_u32(p + 5);
+        p += 9;
+        len -= 9;
+        break;
+    case 18:                        /* big metrics, length, PNG */
+        if (len < 12)
+            return OF_ERR_FONT;
+        out->left = (int8_t)p[2];
+        out->top = (int8_t)p[3];
+        data_len = of_u32(p + 8);
+        p += 12;
+        len -= 12;
+        break;
+    case 19:                        /* length, PNG; the metrics are the index's */
+        if (len < 4 || !metrics)
+            return OF_ERR_FONT;
+        out->left = (int8_t)metrics[2];
+        out->top = (int8_t)metrics[3];
+        data_len = of_u32(p);
+        p += 4;
+        len -= 4;
+        break;
+    default:
+        return OF_ERR_FONT;
+    }
+    if (data_len > len || !png_size(p, data_len, &out->width, &out->height))
+        return OF_ERR_FONT;
+    out->png = p;
+    out->length = data_len;
+    out->ppem = sizes[s];
+    return OF_OK;
+}
+
+static int sbix_png(const OFFont *f, uint32_t glyph, uint32_t ppem, OFColorPng *out)
+{
+    const OFTable *t = &f->sbix;
+    const uint8_t *d = f->data + t->off, *g;
+    uint32_t sizes[MAX_STRIKES], n, i, strike, a, b, hops;
+    int s;
+    if (!in_table(t, 0, 8) || glyph >= f->num_glyphs)
+        return OF_ERR_FONT;
+    n = of_u32(d + 4);
+    if (n > MAX_STRIKES)
+        n = MAX_STRIKES;
+    if (!in_table(t, 8, 4u * n))
+        return OF_ERR_FONT;
+    for (i = 0; i < n; ++i) {
+        uint32_t so = of_u32(d + 8 + 4 * i);
+        sizes[i] = in_table(t, so, 4 + 4u * (f->num_glyphs + 1u)) ? of_u16(d + so) : 0;
+    }
+    if ((s = pick_strike(sizes, n, ppem)) < 0)
+        return OF_ERR_FONT;
+    strike = of_u32(d + 8 + 4 * (uint32_t)s);
+    for (hops = 0; hops < 2; ++hops) {
+        uint32_t type;
+        if (glyph >= f->num_glyphs)
+            return OF_ERR_FONT;
+        a = of_u32(d + strike + 4 + 4 * glyph);
+        b = of_u32(d + strike + 8 + 4 * glyph);
+        if (b <= a || b - a < 8 || !in_table(t, strike + a, b - a))
+            return OF_ERR_FONT;
+        g = d + strike + a;
+        type = of_u32(g + 4);
+        if (type == TAG('d', 'u', 'p', 'e') && b - a >= 10) {
+            glyph = of_u16(g + 8);      /* the same image as another glyph */
+            continue;
+        }
+        if (type != TAG('p', 'n', 'g', ' ') || !png_size(g + 8, b - a - 8, &out->width, &out->height))
+            return OF_ERR_FONT;
+        out->png = g + 8;
+        out->length = b - a - 8;
+        out->ppem = sizes[s];
+        out->left = of_s16(g);
+        out->top = of_s16(g + 2) + (int32_t)out->height;
+        return OF_OK;
+    }
+    return OF_ERR_FONT;
+}
+
+int of_font_color_png(const OFFont *f, uint32_t glyph, uint32_t ppem, OFColorPng *out)
+{
+    memset(out, 0, sizeof *out);
+    if (f->cblc.len && cbdt_png(f, glyph, ppem, out) == OF_OK)
+        return OF_OK;
+    if (f->sbix.len && sbix_png(f, glyph, ppem, out) == OF_OK)
+        return OF_OK;
+    memset(out, 0, sizeof *out);
+    return OF_ERR_FONT;
 }

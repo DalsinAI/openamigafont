@@ -37,9 +37,15 @@ int start(void)
 #include <dos/dosextens.h>
 #include <utility/tagitem.h>
 #include <utility/utility.h>
+#include <utility/hooks.h>
+#include <intuition/classes.h>
+#include <datatypes/datatypes.h>
+#include <datatypes/datatypesclass.h>
+#include <datatypes/pictureclass.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/utility.h>
+#include <proto/datatypes.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +57,7 @@ int start(void)
 #include "of_textfont.h"
 
 #define LIB_VERSION 1
-#define LIB_REVISION 3
+#define LIB_REVISION 4
 #define STACK_SIZE (64 * 1024)
 
 /* The same values as the SDK header's (sdk/Include_H/libraries/openfont.h) */
@@ -73,6 +79,16 @@ int start(void)
 #define OFA_Exact     (OFA_Dummy + 15)
 #define OFERR_NOTPROCESS -9
 
+/* OF_GlyphColorBitmap's result, as the SDK header's struct OFColorBitmap */
+struct OFColorBitmapArg {
+    ULONG *cb_Pixels;
+    ULONG cb_Width;
+    ULONG cb_Height;
+    LONG cb_Left;
+    LONG cb_Top;
+    ULONG cb_PPEM;
+};
+
 /* OF_GlyphOutline's buffers, as the SDK header's struct OFOutline */
 struct OFOutlineArg {
     UBYTE *ol_Verbs;
@@ -92,6 +108,7 @@ typedef char check_feature[sizeof(OFFeature) == 16 ? 1 : -1];
 typedef char check_metrics[sizeof(OFFaceMetrics) == 56 ? 1 : -1];
 typedef char check_extents[sizeof(OFGlyphExtents) == 16 ? 1 : -1];
 typedef char check_outline[sizeof(struct OFOutlineArg) == 24 ? 1 : -1];
+typedef char check_color[sizeof(struct OFColorBitmapArg) == 24 ? 1 : -1];
 
 #define INDEX_FILE "ENVARC:OpenFont/FontIndex"
 #define INDEX_DIR "ENVARC:OpenFont"
@@ -112,15 +129,17 @@ struct OpenFontBase {
     OFIndex index;
     int index_ready;                /* folders and settings read, index loaded */
     struct OFTextFonts fonts;       /* the Amiga fonts OF_OpenTextFont loaded */
+    int datatypes_tried;            /* OF_GlyphColorBitmap opened datatypes.library, or failed to */
 };
 
 struct ExecBase *SysBase;
 struct DosLibrary *DOSBase;
 struct Library *UtilityBase;       /* as proto/utility.h declares it */
+struct Library *DataTypesBase;     /* opened by the first OF_GlyphColorBitmap */
 
 static const char lib_name[] = "openfont.library";
-static const char lib_id[] = "openfont.library 1.3 (23.10.2026) OpenFont 0.6, AmigaChrome Team\r\n";
-static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.3 (23.10.2026) OpenFont 0.6, AmigaChrome Team";
+static const char lib_id[] = "openfont.library 1.4 (23.10.2026) OpenFont 0.6, AmigaChrome Team\r\n";
+static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.4 (23.10.2026) OpenFont 0.6, AmigaChrome Team";
 
 #define REG(r, decl) register decl __asm(#r)
 #define BASE REG(a6, struct OpenFontBase *b)
@@ -552,6 +571,13 @@ static long w_table(void *base, void *arg)
     return (long)t;
 }
 
+static long w_color_png(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_face_color_png(a->face, a->n, a->capacity, (OFColorPng *)a->out);
+}
+
 static long w_glyph_advance_px(void *base, void *arg)
 {
     struct FaceArgs *a = (struct FaceArgs *)arg;
@@ -971,6 +997,107 @@ static LONG L_GlyphAdvancePx(REG(a0, OFFace *face), REG(d0, ULONG glyph), BASE)
     return run(b, w_glyph_advance_px, &a);
 }
 
+/* A PNG in memory through the PNG datatype (picture.datatype's V43
+ * interface), as ARGB, outside the library's lock and stack: the datatype
+ * reads with the caller's stack, as any program's would. */
+static ULONG do_method(Object *o, Msg msg)
+{
+    return CallHookPkt((struct Hook *)OCLASS(o), o, msg);
+}
+
+static LONG decode_png(const UBYTE *png, ULONG length, ULONG width, ULONG height, ULONG **pixels)
+{
+    struct pdtBlitPixelArray read;
+    struct BitMapHeader *bmh = NULL;
+    Object *o;
+    ULONG *buf;
+    *pixels = NULL;
+    o = NewDTObject(NULL,
+                    DTA_SourceType, DTST_MEMORY,
+                    DTA_SourceAddress, (ULONG)png,
+                    DTA_SourceSize, length,
+                    DTA_GroupID, GID_PICTURE,
+                    PDTA_DestMode, PMODE_V43,
+                    PDTA_Remap, FALSE,
+                    TAG_DONE);
+    if (!o)
+        return OF_ERR_EXEC;
+    if (GetDTAttrs(o, PDTA_BitMapHeader, (ULONG)&bmh, TAG_DONE) != 1 || !bmh
+        || bmh->bmh_Width != width || bmh->bmh_Height != height) {
+        DisposeDTObject(o);
+        return OF_ERR_FONT;
+    }
+    buf = (ULONG *)AllocVec(width * height * 4, MEMF_ANY | MEMF_CLEAR);
+    if (!buf) {
+        DisposeDTObject(o);
+        return OF_ERR_MEMORY;
+    }
+    read.MethodID = PDTM_READPIXELARRAY;
+    read.pbpa_PixelData = buf;
+    read.pbpa_PixelFormat = PBPAFMT_ARGB;
+    read.pbpa_PixelArrayMod = width * 4;
+    read.pbpa_Left = 0;
+    read.pbpa_Top = 0;
+    read.pbpa_Width = width;
+    read.pbpa_Height = height;
+    if (!do_method(o, (Msg)&read)) {
+        FreeVec(buf);
+        DisposeDTObject(o);
+        return OF_ERR_EXEC;
+    }
+    DisposeDTObject(o);
+    *pixels = buf;
+    return OF_OK;
+}
+
+static LONG L_GlyphColorBitmap(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(d1, ULONG ppem),
+                               REG(a1, struct OFColorBitmapArg *bitmap), BASE)
+{
+    struct FaceArgs a;
+    OFColorPng png;
+    LONG rc;
+    if (!bitmap)
+        return OF_ERR_ARGUMENT;
+    memset(bitmap, 0, sizeof *bitmap);
+    if (!face)
+        return OF_ERR_ARGUMENT;
+    if (!is_process())
+        return OFERR_NOTPROCESS;
+    memset(&a, 0, sizeof a);
+    a.face = face;
+    a.n = glyph;
+    a.capacity = ppem;
+    a.out = &png;
+    if ((rc = run(b, w_color_png, &a)) != OF_OK)
+        return rc;
+    ObtainSemaphore(&b->lock);
+    if (!b->datatypes_tried) {
+        b->datatypes_tried = 1;
+        DataTypesBase = OpenLibrary((CONST_STRPTR)"datatypes.library", 44);
+    }
+    ReleaseSemaphore(&b->lock);
+    if (!DataTypesBase)
+        return OF_ERR_EXEC;
+    if ((rc = decode_png(png.png, png.length, png.width, png.height, &bitmap->cb_Pixels)) != OF_OK)
+        return rc;
+    bitmap->cb_Width = png.width;
+    bitmap->cb_Height = png.height;
+    bitmap->cb_Left = png.left;
+    bitmap->cb_Top = png.top;
+    bitmap->cb_PPEM = png.ppem;
+    return OF_OK;
+}
+
+static VOID L_FreeColorBitmap(REG(a0, struct OFColorBitmapArg *bitmap), BASE)
+{
+    (void)b;
+    if (!bitmap)
+        return;
+    if (bitmap->cb_Pixels)
+        FreeVec(bitmap->cb_Pixels);
+    memset(bitmap, 0, sizeof *bitmap);
+}
+
 /* ---- the library itself ---- */
 
 static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR seglist), REG(a6, struct ExecBase *sys));
@@ -1012,6 +1139,8 @@ static const APTR lib_vectors[] = {
     (APTR)L_OpenFaceMemoryA,    /* -198, revision 3 */
     (APTR)L_FindFaceForCharA,   /* -204, revision 3 */
     (APTR)L_GlyphAdvancePx,     /* -210, revision 3 */
+    (APTR)L_GlyphColorBitmap,   /* -216, revision 4 */
+    (APTR)L_FreeColorBitmap,    /* -222, revision 4 */
     (APTR)-1
 };
 
@@ -1042,6 +1171,10 @@ static void lib_free(struct OpenFontBase *b)
         FreeMem(b->stack, STACK_SIZE);
     b->stack = NULL;
     of_textfont_cleanup();
+    if (DataTypesBase)
+        CloseLibrary(DataTypesBase);
+    DataTypesBase = NULL;
+    b->datatypes_tried = 0;
     if (UtilityBase)
         CloseLibrary(UtilityBase);
     UtilityBase = NULL;

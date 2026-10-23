@@ -252,6 +252,24 @@ int of_face_glyph_outline(OFFace *face, uint32_t glyph_id,
  * when it has none. It lives as long as the face. */
 const uint8_t *of_face_table(OFFace *face, uint32_t tag, size_t *length);
 
+/* A glyph's colour bitmap as the font holds it: a PNG image from CBDT/CBLC
+ * (Google's colour fonts, such as Noto Color Emoji) or sbix (Apple's), from
+ * the strike nearest ppem: the smallest at least ppem, else the largest
+ * (ppem 0: the largest). The image lives as long as the face; decoding it
+ * is the caller's (openfont.library's OF_GlyphColorBitmap does it through
+ * the PNG datatype). OF_OK; OF_ERR_FONT when the glyph has no PNG colour
+ * bitmap; OF_ERR_RANGE for a glyph the face doesn't have. */
+typedef struct OFColorPng {
+    const uint8_t *png;
+    uint32_t length;
+    uint32_t ppem;                  /* the strike's: scale by size / ppem */
+    int32_t left;                   /* the image's left edge from the pen, strike pixels */
+    int32_t top;                    /* its top edge above the baseline, strike pixels */
+    uint32_t width, height;         /* the image's, from its header */
+} OFColorPng;
+
+int of_face_color_png(OFFace *face, uint32_t glyph_id, uint32_t ppem, OFColorPng *out);
+
 int of_raster_glyph_a8(OFFace *face, uint32_t glyph_id, OFBitmap *out);
 /* The same through a 2 x 2 matrix m of 16.16 pixels to the em, y up
  * (of_path_transform in src/of_font.h): {size, 0, 0, size} draws the glyph

@@ -12,12 +12,14 @@ openfont.library/OF_ErrorString
 openfont.library/OF_FindFaceA
 openfont.library/OF_FindFaceForCharA
 openfont.library/OF_FreeBitmap
+openfont.library/OF_FreeColorBitmap
 openfont.library/OF_GetFaceInfo
 openfont.library/OF_GetFaceMetrics
 openfont.library/OF_GetFallback
 openfont.library/OF_GetFontTable
 openfont.library/OF_GlyphAdvance
 openfont.library/OF_GlyphAdvancePx
+openfont.library/OF_GlyphColorBitmap
 openfont.library/OF_GlyphExtents
 openfont.library/OF_GlyphOutline
 openfont.library/OF_MeasureText
@@ -323,6 +325,21 @@ openfont.library/OF_FreeBitmap                   openfont.library/OF_FreeBitmap
 	Frees bm_Pixels from OF_RasterGlyph or OF_CacheGetGlyph and clears
 	the structure. The structure itself is the caller's.
 
+openfont.library/OF_FreeColorBitmap         openfont.library/OF_FreeColorBitmap
+
+   NAME
+	OF_FreeColorBitmap -- free a colour glyph's pixels (V1, revision 4)
+
+   SYNOPSIS
+	OF_FreeColorBitmap(bitmap)
+	                   A0
+
+	VOID OF_FreeColorBitmap(struct OFColorBitmap *);
+
+   FUNCTION
+	Frees cb_Pixels from OF_GlyphColorBitmap and clears the structure.
+	The structure itself is the caller's.
+
 openfont.library/OF_GetFaceInfo                 openfont.library/OF_GetFaceInfo
 
    NAME
@@ -433,6 +450,43 @@ openfont.library/OF_GlyphAdvancePx           openfont.library/OF_GlyphAdvancePx
 	The glyph's horizontal advance at the face's pixel size, in 26.6
 	pixels, unrounded, as shaping gives it before kerning. -1 for a
 	glyph the face doesn't have.
+
+openfont.library/OF_GlyphColorBitmap         openfont.library/OF_GlyphColorBitmap
+
+   NAME
+	OF_GlyphColorBitmap -- a colour glyph (an emoji) as pixels (V1, revision 4)
+
+   SYNOPSIS
+	error = OF_GlyphColorBitmap(face, glyph, ppem, bitmap)
+	D0                          A0    D0     D1    A1
+
+	LONG OF_GlyphColorBitmap(struct OFFace *, ULONG, ULONG,
+	                         struct OFColorBitmap *);
+
+   FUNCTION
+	The glyph's colour image, for fonts that hold their emoji as PNG
+	images: CBDT/CBLC (Google's, such as Noto Color Emoji) and sbix
+	(Apple's). The image comes from the strike nearest ppem: the
+	smallest at least ppem, else the largest (ppem 0: the largest). It
+	is decoded through the PNG datatype (datatypes.library 44 or newer,
+	opened on first use), with no PNG code in the library.
+
+	cb_Pixels holds cb_Width x cb_Height pixels, 0xAARRGGBB, not
+	premultiplied. cb_Left and cb_Top place the image's top-left corner
+	from the pen, y up, in the strike's pixels; cb_PPEM is the strike's
+	size, so a caller drawing at another size scales everything by
+	size / cb_PPEM. Free the pixels with OF_FreeColorBitmap.
+
+	The image's size is the PNG's own; one larger than 16384 pixels
+	either way is refused.
+
+   RESULT
+	OFERR_OK; OFERR_FONT when the glyph has no PNG colour image (an
+	outline glyph, or COLR and SVG colour glyphs, which are not
+	decoded); OFERR_RANGE for a glyph the face doesn't have;
+	OFERR_EXEC when datatypes.library or the PNG datatype is missing or
+	cannot decode it; OFERR_MEMORY; OFERR_NOTPROCESS from a plain task
+	(datatypes read through DOS). On failure cb_Pixels is NULL.
 
 openfont.library/OF_GlyphExtents               openfont.library/OF_GlyphExtents
 

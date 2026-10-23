@@ -618,4 +618,38 @@ __openfont_OF_GlyphAdvancePx(void *__base, struct OFFace * face, ULONG glyph)
 #define OF_GlyphAdvancePx(face, glyph) __openfont_OF_GlyphAdvancePx((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph))
 #define __OF_GlyphAdvancePx_base(__in_base, face, glyph) __openfont_OF_GlyphAdvancePx((__in_base), (struct OFFace *)(face), (ULONG)(glyph))
 
+static __inline__ LONG
+__openfont_OF_GlyphColorBitmap(void *__base, struct OFFace * face, ULONG glyph, ULONG ppem, struct OFColorBitmap * bitmap)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _d0 __asm("d0") = (ULONG)(glyph);
+	register ULONG _d1 __asm("d1") = (ULONG)(ppem);
+	register ULONG _a1 __asm("a1") = (ULONG)(bitmap);
+	register void *_a6 __asm("a6") = __base;
+	__asm__ __volatile__ ("jsr -216(%/a6)"
+		: "+r" (_d0), "+r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (LONG)_d0;
+}
+#define OF_GlyphColorBitmap(face, glyph, ppem, bitmap) __openfont_OF_GlyphColorBitmap((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph), (ULONG)(ppem), (struct OFColorBitmap *)(bitmap))
+#define __OF_GlyphColorBitmap_base(__in_base, face, glyph, ppem, bitmap) __openfont_OF_GlyphColorBitmap((__in_base), (struct OFFace *)(face), (ULONG)(glyph), (ULONG)(ppem), (struct OFColorBitmap *)(bitmap))
+
+static __inline__ VOID
+__openfont_OF_FreeColorBitmap(void *__base, struct OFColorBitmap * bitmap)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(bitmap);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d0 __asm("d0");
+	register ULONG _d1 __asm("d1");
+	register ULONG _a1 __asm("a1");
+	__asm__ __volatile__ ("jsr -222(%/a6)"
+		: "=r" (_d0), "=r" (_d1), "+r" (_a0), "=r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	(void)_d0; (void)_d1; (void)_a0; (void)_a1;
+}
+#define OF_FreeColorBitmap(bitmap) __openfont_OF_FreeColorBitmap((OPENFONT_BASE_NAME), (struct OFColorBitmap *)(bitmap))
+#define __OF_FreeColorBitmap_base(__in_base, bitmap) __openfont_OF_FreeColorBitmap((__in_base), (struct OFColorBitmap *)(bitmap))
+
 #endif /* INLINE_OPENFONT_H */

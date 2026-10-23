@@ -34,4 +34,6 @@ OF_GetFontTable(face,tag,length)(a0,d0,a1)
 OF_OpenFaceMemoryA(data,size,tags)(a0,d0,a1)
 OF_FindFaceForCharA(codepoint,tags)(d0,a0)
 OF_GlyphAdvancePx(face,glyph)(a0,d0)
+OF_GlyphColorBitmap(face,glyph,ppem,bitmap)(a0,d0,d1,a1)
+OF_FreeColorBitmap(bitmap)(a0)
 ##end

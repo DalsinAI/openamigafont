@@ -75,7 +75,7 @@ typedef struct OFFont {
     uint32_t num_faces;             /* in the file: a collection holds several */
     uint32_t dir;                   /* this face's table directory */
     OFTable head, hhea, hmtx, maxp, cmap, loca, glyf, cff, cff2, name, os2, post,
-            kern, gsub, gpos, gdef, colr, cbdt, sbix, svg;
+            kern, gsub, gpos, gdef, colr, cbdt, cblc, sbix, svg;
     uint16_t units_per_em;
     uint16_t mac_style;
     int16_t index_to_loc;           /* 0 short, 1 long */
@@ -155,6 +155,12 @@ unsigned of_font_style(const OFFont *f);
 
 /* whether it has colour glyphs (COLR, CBDT, sbix or SVG) */
 int of_font_has_color(const OFFont *f);
+
+/* A glyph's PNG colour bitmap (CBDT/CBLC or sbix) from the strike nearest
+ * ppem (openfont.h, of_face_color_png). OF_OK, or OF_ERR_FONT when the
+ * glyph has none. */
+struct OFColorPng;
+int of_font_color_png(const OFFont *f, uint32_t glyph, uint32_t ppem, struct OFColorPng *out);
 
 /* ---- internal: CFF (of_cff.c) ---- */
 
