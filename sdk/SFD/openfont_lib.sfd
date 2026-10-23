@@ -1,4 +1,4 @@
-==id OpenFont openfont_lib.sfd 1.2
+==id OpenFont openfont_lib.sfd 1.3
 * openfont.library's calls: fonts, shaping, glyphs and the font index.
 * Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
 * Version 1 is a preview: its calls may still change. They are frozen from
@@ -45,4 +45,22 @@ LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph) (a0,d0)
 * revision 2 (openfont.library 1.2): an Amiga font (FONTS:, bitmap or
 * outline) as a TextFont, as diskfont.library's OpenDiskFont gives one
 struct TextFont * OF_OpenTextFont(CONST struct TextAttr * textAttr) (a0)
+* revision 3 (openfont.library 1.3): what a layout engine such as WebCore
+* asks: shaping with a script, language, direction and features, UTF-16
+* text, a face's metrics, glyph outlines and ink boxes, its tables, faces
+* from memory (web fonts), and a face for a character
+ULONG OF_ShapeA(struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, CONST struct TagItem * tags) (a0,a1,d0,a2,d1,a3)
+==varargs
+ULONG OF_Shape(struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, Tag tag1, ...) (a0,a1,d0,a2,d1,a3)
+LONG OF_GetFaceMetrics(struct OFFace * face, struct OFFaceMetrics * metrics) (a0,a1)
+LONG OF_GlyphOutline(struct OFFace * face, ULONG glyph, struct OFOutline * outline) (a0,d0,a1)
+LONG OF_GlyphExtents(struct OFFace * face, ULONG glyph, struct OFGlyphExtents * extents) (a0,d0,a1)
+CONST_APTR OF_GetFontTable(struct OFFace * face, ULONG tag, ULONG * length) (a0,d0,a1)
+struct OFFace * OF_OpenFaceMemoryA(CONST_APTR data, ULONG size, CONST struct TagItem * tags) (a0,d0,a1)
+==varargs
+struct OFFace * OF_OpenFaceMemory(CONST_APTR data, ULONG size, Tag tag1, ...) (a0,d0,a1)
+struct OFFace * OF_FindFaceForCharA(ULONG codepoint, CONST struct TagItem * tags) (d0,a0)
+==varargs
+struct OFFace * OF_FindFaceForChar(ULONG codepoint, Tag tag1, ...) (d0,a0)
+LONG OF_GlyphAdvancePx(struct OFFace * face, ULONG glyph) (a0,d0)
 ==end

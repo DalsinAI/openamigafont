@@ -20,7 +20,9 @@ Unicode Standard), never from their code:
 
 1. the font reader and the rasteriser (FreeType out): done, 17 October 2026;
 2. the shaper for Latin (cmap, GPOS pair kerning and `kern`, GSUB ligatures,
-   simple mark attachment), HarfBuzz out: done, 17 October 2026;
+   simple mark attachment), HarfBuzz out: done, 17 October 2026 (on main
+   with openfont.library 1.3, 23 October 2026); scripts, languages, right to
+   left, joining and features for WebCore: done, 23 October 2026;
 3. the text functions: UTF-8/16, Unicode properties from the UCD, line breaks
    (UAX #14), grapheme and word boundaries (UAX #29), NFC and IDNA, so
    OpenFont is the one place for them and can later take ICU's place for

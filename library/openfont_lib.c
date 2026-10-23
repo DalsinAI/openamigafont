@@ -51,7 +51,7 @@ int start(void)
 #include "of_textfont.h"
 
 #define LIB_VERSION 1
-#define LIB_REVISION 2
+#define LIB_REVISION 3
 #define STACK_SIZE (64 * 1024)
 
 /* The same values as the SDK header's (sdk/Include_H/libraries/openfont.h) */
@@ -62,13 +62,35 @@ int start(void)
 #define OFA_Italic    (OFA_Dummy + 4)
 #define OFA_Fallbacks (OFA_Dummy + 5)
 #define OFA_Error     (OFA_Dummy + 6)
+#define OFA_Script    (OFA_Dummy + 7)
+#define OFA_Language  (OFA_Dummy + 8)
+#define OFA_Direction (OFA_Dummy + 9)
+#define OFA_Features  (OFA_Dummy + 10)
+#define OFA_NumFeatures (OFA_Dummy + 11)
+#define OFA_Offset    (OFA_Dummy + 12)
+#define OFA_Length    (OFA_Dummy + 13)
+#define OFA_UTF16     (OFA_Dummy + 14)
 #define OFERR_NOTPROCESS -9
+
+/* OF_GlyphOutline's buffers, as the SDK header's struct OFOutline */
+struct OFOutlineArg {
+    UBYTE *ol_Verbs;
+    LONG *ol_Points;
+    ULONG ol_MaxVerbs;
+    ULONG ol_MaxPoints;
+    ULONG ol_NumVerbs;
+    ULONG ol_NumPoints;
+};
 
 /* The SDK's structures are the core's, field for field: checked here, on the
  * 68k, where both are compiled with the same alignment. */
 typedef char check_glyph[sizeof(OFGlyph) == 28 ? 1 : -1];
 typedef char check_bitmap[sizeof(OFBitmap) == 28 ? 1 : -1];
 typedef char check_info[sizeof(OFFaceInfo) == 176 ? 1 : -1];
+typedef char check_feature[sizeof(OFFeature) == 16 ? 1 : -1];
+typedef char check_metrics[sizeof(OFFaceMetrics) == 56 ? 1 : -1];
+typedef char check_extents[sizeof(OFGlyphExtents) == 16 ? 1 : -1];
+typedef char check_outline[sizeof(struct OFOutlineArg) == 24 ? 1 : -1];
 
 #define INDEX_FILE "ENVARC:OpenFont/FontIndex"
 #define INDEX_DIR "ENVARC:OpenFont"
@@ -96,8 +118,8 @@ struct DosLibrary *DOSBase;
 struct Library *UtilityBase;       /* as proto/utility.h declares it */
 
 static const char lib_name[] = "openfont.library";
-static const char lib_id[] = "openfont.library 1.2 (22.10.2026) OpenFont 0.5, AmigaChrome Team\r\n";
-static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.2 (22.10.2026) OpenFont 0.5, AmigaChrome Team";
+static const char lib_id[] = "openfont.library 1.3 (23.10.2026) OpenFont 0.6, AmigaChrome Team\r\n";
+static const char ver_tag[] __attribute__((used)) = "$VER: openfont.library 1.3 (23.10.2026) OpenFont 0.6, AmigaChrome Team";
 
 #define REG(r, decl) register decl __asm(#r)
 #define BASE REG(a6, struct OpenFontBase *b)
@@ -457,6 +479,156 @@ static long w_open_textfont(void *base, void *arg)
     return (long)of_textfont_open(&b->fonts, ctx, (const struct TextAttr *)arg);
 }
 
+/* ---- revision 3: what a layout engine (WebCore) asks ---- */
+
+struct ShapeArgs {
+    OFFace *face;
+    const void *text;
+    ULONG length;
+    OFGlyph *out;
+    ULONG capacity;
+    const struct TagItem *tags;
+};
+
+static long w_shape_tags(void *base, void *arg)
+{
+    struct ShapeArgs *a = (struct ShapeArgs *)arg;
+    struct TagItem *tags = (struct TagItem *)a->tags;
+    OFShapeOptions o;
+    ULONG off = GetTagData(OFA_Offset, 0, tags);
+    ULONG len = GetTagData(OFA_Length, a->length, tags);
+    (void)base;
+    memset(&o, 0, sizeof o);
+    o.script = GetTagData(OFA_Script, 0, tags);
+    o.language = GetTagData(OFA_Language, 0, tags);
+    o.direction = GetTagData(OFA_Direction, OF_DIR_AUTO, tags);
+    o.features = (const OFFeature *)GetTagData(OFA_Features, 0, tags);
+    o.num_features = o.features ? GetTagData(OFA_NumFeatures, 0, tags) : 0;
+    if (GetTagData(OFA_UTF16, FALSE, tags))
+        return (long)of_shape_utf16(a->face, (const uint16_t *)a->text, a->length, off, len, &o, a->out, a->capacity);
+    return (long)of_shape(a->face, (const char *)a->text, a->length, off, len, &o, a->out, a->capacity);
+}
+
+static long w_metrics(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_face_metrics(a->face, (OFFaceMetrics *)a->out);
+}
+
+static long w_extents(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_face_glyph_extents(a->face, a->n, (OFGlyphExtents *)a->out);
+}
+
+static long w_outline(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    struct OFOutlineArg *o = (struct OFOutlineArg *)a->out;
+    size_t nv = 0, np = 0;
+    int rc;
+    (void)base;
+    rc = of_face_glyph_outline(a->face, a->n, o->ol_Verbs, o->ol_Verbs ? o->ol_MaxVerbs : 0,
+                               (int32_t *)o->ol_Points, o->ol_Points ? o->ol_MaxPoints : 0, &nv, &np);
+    o->ol_NumVerbs = (ULONG)nv;
+    o->ol_NumPoints = (ULONG)np;
+    return rc;
+}
+
+static long w_table(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    size_t len = 0;
+    const uint8_t *t;
+    (void)base;
+    t = of_face_table(a->face, a->n, &len);
+    if (a->out)
+        *(ULONG *)a->out = (ULONG)len;
+    return (long)t;
+}
+
+static long w_glyph_advance_px(void *base, void *arg)
+{
+    struct FaceArgs *a = (struct FaceArgs *)arg;
+    (void)base;
+    return of_face_glyph_advance_px(a->face, a->n);
+}
+
+struct MemArgs {
+    const UBYTE *data;
+    ULONG size;
+    const struct TagItem *tags;
+};
+
+static long w_open_memory(void *base, void *arg)
+{
+    struct OpenFontBase *b = (struct OpenFontBase *)base;
+    struct MemArgs *a = (struct MemArgs *)arg;
+    OFContext *ctx = context(b);
+    ULONG index = GetTagData(OFA_Index, 0, (struct TagItem *)a->tags);
+    ULONG size = GetTagData(OFA_Size, 16, (struct TagItem *)a->tags);
+    uint8_t *copy;
+    OFFace *face;
+    if (!ctx) {
+        set_error(a->tags, OF_ERR_MEMORY);
+        return 0;
+    }
+    /* the face keeps its own copy, in the library's pool, so the caller's
+     * memory may go at once */
+    copy = (uint8_t *)malloc(a->size);
+    if (!copy) {
+        set_error(a->tags, OF_ERR_MEMORY);
+        return 0;
+    }
+    memcpy(copy, a->data, a->size);
+    face = of_face_open_memory(ctx, copy, a->size, index, 1);
+    if (!face) {
+        set_error(a->tags, OF_ERR_FONT);    /* the face freed the copy, or never took it */
+        return 0;
+    }
+    if (size && of_face_set_pixel_size(face, size) != OF_OK) {
+        of_face_close(face);
+        set_error(a->tags, OF_ERR_FONT);
+        return 0;
+    }
+    set_error(a->tags, OF_OK);
+    return (long)face;
+}
+
+struct CharArgs {
+    ULONG codepoint;
+    const struct TagItem *tags;
+};
+
+static long w_face_for_char(void *base, void *arg)
+{
+    struct OpenFontBase *b = (struct OpenFontBase *)base;
+    struct CharArgs *a = (struct CharArgs *)arg;
+    ULONG weight = GetTagData(OFA_Weight, 400, (struct TagItem *)a->tags);
+    ULONG italic = GetTagData(OFA_Italic, FALSE, (struct TagItem *)a->tags);
+    ULONG size = GetTagData(OFA_Size, 16, (struct TagItem *)a->tags);
+    OFFace *face;
+    int rc = refresh_index(b, 0);
+    if (rc != OF_OK) {
+        set_error(a->tags, rc);
+        return 0;
+    }
+    face = of_index_open_char(&b->index, b->ctx, a->codepoint, (uint16_t)weight, italic != 0, &rc);
+    if (!face) {
+        set_error(a->tags, rc);
+        return 0;
+    }
+    if (size && of_face_set_pixel_size(face, size) != OF_OK) {
+        of_face_close(face);
+        set_error(a->tags, OF_ERR_FONT);
+        return 0;
+    }
+    set_error(a->tags, OF_OK);
+    return (long)face;
+}
+
 /* ---- the library's vectors ---- */
 
 static ULONG L_Version(BASE)
@@ -701,6 +873,101 @@ static struct TextFont *L_OpenTextFont(REG(a0, struct TextAttr *ta), BASE)
     return (struct TextFont *)run(b, w_open_textfont, ta);
 }
 
+static ULONG L_ShapeA(REG(a0, OFFace *face), REG(a1, APTR text), REG(d0, ULONG length),
+                      REG(a2, OFGlyph *glyphs), REG(d1, ULONG capacity), REG(a3, const struct TagItem *tags), BASE)
+{
+    struct ShapeArgs a;
+    if (!face || !text || !length)
+        return 0;
+    a.face = face;
+    a.text = text;
+    a.length = length;
+    a.out = glyphs;
+    a.capacity = glyphs ? capacity : 0;
+    a.tags = tags;
+    return (ULONG)run(b, w_shape_tags, &a);
+}
+
+static LONG L_GetFaceMetrics(REG(a0, OFFace *face), REG(a1, OFFaceMetrics *metrics), BASE)
+{
+    struct FaceArgs a;
+    if (!face || !metrics)
+        return OF_ERR_ARGUMENT;
+    a.face = face;
+    a.out = metrics;
+    return run(b, w_metrics, &a);
+}
+
+static LONG L_GlyphOutline(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(a1, struct OFOutlineArg *outline), BASE)
+{
+    struct FaceArgs a;
+    if (!face || !outline)
+        return OF_ERR_ARGUMENT;
+    a.face = face;
+    a.n = glyph;
+    a.out = outline;
+    return run(b, w_outline, &a);
+}
+
+static LONG L_GlyphExtents(REG(a0, OFFace *face), REG(d0, ULONG glyph), REG(a1, OFGlyphExtents *extents), BASE)
+{
+    struct FaceArgs a;
+    if (!face || !extents)
+        return OF_ERR_ARGUMENT;
+    a.face = face;
+    a.n = glyph;
+    a.out = extents;
+    return run(b, w_extents, &a);
+}
+
+static APTR L_GetFontTable(REG(a0, OFFace *face), REG(d0, ULONG tag), REG(a1, ULONG *length), BASE)
+{
+    struct FaceArgs a;
+    if (length)
+        *length = 0;
+    if (!face)
+        return NULL;
+    a.face = face;
+    a.n = tag;
+    a.out = length;
+    return (APTR)run(b, w_table, &a);
+}
+
+static OFFace *L_OpenFaceMemoryA(REG(a0, CONST_APTR data), REG(d0, ULONG size), REG(a1, const struct TagItem *tags), BASE)
+{
+    struct MemArgs a;
+    if (!data || !size) {
+        set_error(tags, OF_ERR_ARGUMENT);
+        return NULL;
+    }
+    a.data = (const UBYTE *)data;
+    a.size = size;
+    a.tags = tags;
+    return (OFFace *)run(b, w_open_memory, &a);
+}
+
+static OFFace *L_FindFaceForCharA(REG(d0, ULONG codepoint), REG(a0, const struct TagItem *tags), BASE)
+{
+    struct CharArgs a;
+    if (!is_process()) {
+        set_error(tags, OFERR_NOTPROCESS);
+        return NULL;
+    }
+    a.codepoint = codepoint;
+    a.tags = tags;
+    return (OFFace *)run(b, w_face_for_char, &a);
+}
+
+static LONG L_GlyphAdvancePx(REG(a0, OFFace *face), REG(d0, ULONG glyph), BASE)
+{
+    struct FaceArgs a;
+    if (!face)
+        return -1;
+    a.face = face;
+    a.n = glyph;
+    return run(b, w_glyph_advance_px, &a);
+}
+
 /* ---- the library itself ---- */
 
 static struct Library *lib_init(REG(d0, struct OpenFontBase *b), REG(a0, BPTR seglist), REG(a6, struct ExecBase *sys));
@@ -734,6 +1001,14 @@ static const APTR lib_vectors[] = {
     (APTR)L_RasterGlyphMatrix,  /* -150, revision 1 */
     (APTR)L_GlyphAdvance,       /* -156, revision 1 */
     (APTR)L_OpenTextFont,       /* -162, revision 2 */
+    (APTR)L_ShapeA,             /* -168, revision 3 */
+    (APTR)L_GetFaceMetrics,     /* -174, revision 3 */
+    (APTR)L_GlyphOutline,       /* -180, revision 3 */
+    (APTR)L_GlyphExtents,       /* -186, revision 3 */
+    (APTR)L_GetFontTable,       /* -192, revision 3 */
+    (APTR)L_OpenFaceMemoryA,    /* -198, revision 3 */
+    (APTR)L_FindFaceForCharA,   /* -204, revision 3 */
+    (APTR)L_GlyphAdvancePx,     /* -210, revision 3 */
     (APTR)-1
 };
 

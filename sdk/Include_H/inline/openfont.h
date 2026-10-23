@@ -447,4 +447,175 @@ __openfont_OF_OpenTextFont(void *__base, CONST struct TextAttr * textAttr)
 #define OF_OpenTextFont(textAttr) __openfont_OF_OpenTextFont((OPENFONT_BASE_NAME), (CONST struct TextAttr *)(textAttr))
 #define __OF_OpenTextFont_base(__in_base, textAttr) __openfont_OF_OpenTextFont((__in_base), (CONST struct TextAttr *)(textAttr))
 
+static __inline__ ULONG
+__openfont_OF_ShapeA(void *__base, struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, CONST struct TagItem * tags)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _a1 __asm("a1") = (ULONG)(text);
+	register ULONG _d0 __asm("d0") = (ULONG)(length);
+	register ULONG _a2 __asm("a2") = (ULONG)(glyphs);
+	register ULONG _d1 __asm("d1") = (ULONG)(capacity);
+	register ULONG _a3 __asm("a3") = (ULONG)(tags);
+	register void *_a6 __asm("a6") = __base;
+	__asm__ __volatile__ ("jsr -168(%/a6)"
+		: "+r" (_d0), "+r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a2), "r" (_a3), "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (ULONG)_d0;
+}
+#define OF_ShapeA(face, text, length, glyphs, capacity, tags) __openfont_OF_ShapeA((OPENFONT_BASE_NAME), (struct OFFace *)(face), (CONST_APTR)(text), (ULONG)(length), (struct OFGlyph *)(glyphs), (ULONG)(capacity), (CONST struct TagItem *)(tags))
+#define __OF_ShapeA_base(__in_base, face, text, length, glyphs, capacity, tags) __openfont_OF_ShapeA((__in_base), (struct OFFace *)(face), (CONST_APTR)(text), (ULONG)(length), (struct OFGlyph *)(glyphs), (ULONG)(capacity), (CONST struct TagItem *)(tags))
+
+static __OPENNDK_VA_ATTR ULONG
+__OF_Shape_va(void *__base, struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, ...)
+{
+	__builtin_va_list _ap;
+	__builtin_va_start(_ap, capacity);
+	ULONG _r = (ULONG)__openfont_OF_ShapeA(__base, (struct OFFace *)(face), (CONST_APTR)(text), (ULONG)(length), (struct OFGlyph *)(glyphs), (ULONG)(capacity), (CONST struct TagItem *)_ap);
+	__builtin_va_end(_ap);
+	return _r;
+}
+#define OF_Shape(face, text, length, glyphs, capacity, ...) __OF_Shape_va((OPENFONT_BASE_NAME), (struct OFFace *)(face), (CONST_APTR)(text), (ULONG)(length), (struct OFGlyph *)(glyphs), (ULONG)(capacity), ##__VA_ARGS__)
+
+static __inline__ LONG
+__openfont_OF_GetFaceMetrics(void *__base, struct OFFace * face, struct OFFaceMetrics * metrics)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _a1 __asm("a1") = (ULONG)(metrics);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d0 __asm("d0");
+	register ULONG _d1 __asm("d1");
+	__asm__ __volatile__ ("jsr -174(%/a6)"
+		: "=r" (_d0), "=r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (LONG)_d0;
+}
+#define OF_GetFaceMetrics(face, metrics) __openfont_OF_GetFaceMetrics((OPENFONT_BASE_NAME), (struct OFFace *)(face), (struct OFFaceMetrics *)(metrics))
+#define __OF_GetFaceMetrics_base(__in_base, face, metrics) __openfont_OF_GetFaceMetrics((__in_base), (struct OFFace *)(face), (struct OFFaceMetrics *)(metrics))
+
+static __inline__ LONG
+__openfont_OF_GlyphOutline(void *__base, struct OFFace * face, ULONG glyph, struct OFOutline * outline)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _d0 __asm("d0") = (ULONG)(glyph);
+	register ULONG _a1 __asm("a1") = (ULONG)(outline);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	__asm__ __volatile__ ("jsr -180(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (LONG)_d0;
+}
+#define OF_GlyphOutline(face, glyph, outline) __openfont_OF_GlyphOutline((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph), (struct OFOutline *)(outline))
+#define __OF_GlyphOutline_base(__in_base, face, glyph, outline) __openfont_OF_GlyphOutline((__in_base), (struct OFFace *)(face), (ULONG)(glyph), (struct OFOutline *)(outline))
+
+static __inline__ LONG
+__openfont_OF_GlyphExtents(void *__base, struct OFFace * face, ULONG glyph, struct OFGlyphExtents * extents)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _d0 __asm("d0") = (ULONG)(glyph);
+	register ULONG _a1 __asm("a1") = (ULONG)(extents);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	__asm__ __volatile__ ("jsr -186(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (LONG)_d0;
+}
+#define OF_GlyphExtents(face, glyph, extents) __openfont_OF_GlyphExtents((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph), (struct OFGlyphExtents *)(extents))
+#define __OF_GlyphExtents_base(__in_base, face, glyph, extents) __openfont_OF_GlyphExtents((__in_base), (struct OFFace *)(face), (ULONG)(glyph), (struct OFGlyphExtents *)(extents))
+
+static __inline__ CONST_APTR
+__openfont_OF_GetFontTable(void *__base, struct OFFace * face, ULONG tag, ULONG * length)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _d0 __asm("d0") = (ULONG)(tag);
+	register ULONG _a1 __asm("a1") = (ULONG)(length);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	__asm__ __volatile__ ("jsr -192(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (CONST_APTR)_d0;
+}
+#define OF_GetFontTable(face, tag, length) __openfont_OF_GetFontTable((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(tag), (ULONG *)(length))
+#define __OF_GetFontTable_base(__in_base, face, tag, length) __openfont_OF_GetFontTable((__in_base), (struct OFFace *)(face), (ULONG)(tag), (ULONG *)(length))
+
+static __inline__ struct OFFace *
+__openfont_OF_OpenFaceMemoryA(void *__base, CONST_APTR data, ULONG size, CONST struct TagItem * tags)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(data);
+	register ULONG _d0 __asm("d0") = (ULONG)(size);
+	register ULONG _a1 __asm("a1") = (ULONG)(tags);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	__asm__ __volatile__ ("jsr -198(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "+r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (struct OFFace *)_d0;
+}
+#define OF_OpenFaceMemoryA(data, size, tags) __openfont_OF_OpenFaceMemoryA((OPENFONT_BASE_NAME), (CONST_APTR)(data), (ULONG)(size), (CONST struct TagItem *)(tags))
+#define __OF_OpenFaceMemoryA_base(__in_base, data, size, tags) __openfont_OF_OpenFaceMemoryA((__in_base), (CONST_APTR)(data), (ULONG)(size), (CONST struct TagItem *)(tags))
+
+static __OPENNDK_VA_ATTR struct OFFace *
+__OF_OpenFaceMemory_va(void *__base, CONST_APTR data, ULONG size, ...)
+{
+	__builtin_va_list _ap;
+	__builtin_va_start(_ap, size);
+	struct OFFace * _r = (struct OFFace *)__openfont_OF_OpenFaceMemoryA(__base, (CONST_APTR)(data), (ULONG)(size), (CONST struct TagItem *)_ap);
+	__builtin_va_end(_ap);
+	return _r;
+}
+#define OF_OpenFaceMemory(data, size, ...) __OF_OpenFaceMemory_va((OPENFONT_BASE_NAME), (CONST_APTR)(data), (ULONG)(size), ##__VA_ARGS__)
+
+static __inline__ struct OFFace *
+__openfont_OF_FindFaceForCharA(void *__base, ULONG codepoint, CONST struct TagItem * tags)
+{
+	register ULONG _d0 __asm("d0") = (ULONG)(codepoint);
+	register ULONG _a0 __asm("a0") = (ULONG)(tags);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	register ULONG _a1 __asm("a1");
+	__asm__ __volatile__ ("jsr -204(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "=r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (struct OFFace *)_d0;
+}
+#define OF_FindFaceForCharA(codepoint, tags) __openfont_OF_FindFaceForCharA((OPENFONT_BASE_NAME), (ULONG)(codepoint), (CONST struct TagItem *)(tags))
+#define __OF_FindFaceForCharA_base(__in_base, codepoint, tags) __openfont_OF_FindFaceForCharA((__in_base), (ULONG)(codepoint), (CONST struct TagItem *)(tags))
+
+static __OPENNDK_VA_ATTR struct OFFace *
+__OF_FindFaceForChar_va(void *__base, ULONG codepoint, ...)
+{
+	__builtin_va_list _ap;
+	__builtin_va_start(_ap, codepoint);
+	struct OFFace * _r = (struct OFFace *)__openfont_OF_FindFaceForCharA(__base, (ULONG)(codepoint), (CONST struct TagItem *)_ap);
+	__builtin_va_end(_ap);
+	return _r;
+}
+#define OF_FindFaceForChar(codepoint, ...) __OF_FindFaceForChar_va((OPENFONT_BASE_NAME), (ULONG)(codepoint), ##__VA_ARGS__)
+
+static __inline__ LONG
+__openfont_OF_GlyphAdvancePx(void *__base, struct OFFace * face, ULONG glyph)
+{
+	register ULONG _a0 __asm("a0") = (ULONG)(face);
+	register ULONG _d0 __asm("d0") = (ULONG)(glyph);
+	register void *_a6 __asm("a6") = __base;
+	register ULONG _d1 __asm("d1");
+	register ULONG _a1 __asm("a1");
+	__asm__ __volatile__ ("jsr -210(%/a6)"
+		: "+r" (_d0), "=r" (_d1), "+r" (_a0), "=r" (_a1)
+		: "r" (_a6)
+		: __OPENNDK_FPCLOBBER "cc", "memory");
+	return (LONG)_d0;
+}
+#define OF_GlyphAdvancePx(face, glyph) __openfont_OF_GlyphAdvancePx((OPENFONT_BASE_NAME), (struct OFFace *)(face), (ULONG)(glyph))
+#define __OF_GlyphAdvancePx_base(__in_base, face, glyph) __openfont_OF_GlyphAdvancePx((__in_base), (struct OFFace *)(face), (ULONG)(glyph))
+
 #endif /* INLINE_OPENFONT_H */

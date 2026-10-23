@@ -10,18 +10,26 @@ openfont.library/OF_CloseCache
 openfont.library/OF_CloseFace
 openfont.library/OF_ErrorString
 openfont.library/OF_FindFaceA
+openfont.library/OF_FindFaceForCharA
 openfont.library/OF_FreeBitmap
 openfont.library/OF_GetFaceInfo
-openfont.library/OF_GlyphAdvance
+openfont.library/OF_GetFaceMetrics
 openfont.library/OF_GetFallback
+openfont.library/OF_GetFontTable
+openfont.library/OF_GlyphAdvance
+openfont.library/OF_GlyphAdvancePx
+openfont.library/OF_GlyphExtents
+openfont.library/OF_GlyphOutline
 openfont.library/OF_MeasureText
 openfont.library/OF_OpenCache
 openfont.library/OF_OpenFaceA
+openfont.library/OF_OpenFaceMemoryA
 openfont.library/OF_OpenTextFont
 openfont.library/OF_RasterGlyph
 openfont.library/OF_RasterGlyphMatrix
 openfont.library/OF_RescanFonts
 openfont.library/OF_SetSize
+openfont.library/OF_ShapeA
 openfont.library/OF_ShapeText
 openfont.library/OF_Version
 
@@ -43,8 +51,9 @@ openfont.library/--background--                 openfont.library/--background--
 	exactly if you depend on its layout.
 
    TEXT
-	Text is UTF-8, with its length in bytes. Positions, advances and
-	metrics are 26.6 fixed point pixels: 64 is one pixel.
+	Text is UTF-8, with its length in bytes; OF_ShapeA (revision 3)
+	also takes UTF-16. Positions, advances and metrics are 26.6 fixed
+	point pixels: 64 is one pixel.
 
    FACES
 	A face is one font of a file (a collection, .ttc or .otc, holds
@@ -267,6 +276,33 @@ openfont.library/OF_FindFaceA                     openfont.library/OF_FindFaceA
    RESULT
 	face - or NULL.
 
+openfont.library/OF_FindFaceForCharA       openfont.library/OF_FindFaceForCharA
+
+   NAME
+	OF_FindFaceForCharA -- a face that has a character (V1, revision 3)
+	OF_FindFaceForChar -- varargs stub
+
+   SYNOPSIS
+	face = OF_FindFaceForCharA(codepoint, tags)
+	D0                         D0         A0
+
+	struct OFFace *OF_FindFaceForCharA(ULONG, const struct TagItem *);
+	struct OFFace *OF_FindFaceForChar(ULONG, Tag, ...);
+
+   FUNCTION
+	Opens a face with a glyph for codepoint: the default fallback
+	chain's families first (ENVARC:OpenFont/Fallbacks), then each
+	family's best face for the weight and slant, in the index's order.
+	The face has no fallbacks of its own. A layout engine calls it for
+	text its fonts have no glyphs for, and keeps what it gets. It reads
+	files: a process only.
+
+   INPUTS
+	tags - OFA_Weight, OFA_Italic, OFA_Size (16), OFA_Error.
+
+   RESULT
+	face - or NULL: none has it (OFERR_FONT), or OFERR_NOTPROCESS.
+
 openfont.library/OF_FreeBitmap                   openfont.library/OF_FreeBitmap
 
    NAME
@@ -299,24 +335,25 @@ openfont.library/OF_GetFaceInfo                 openfont.library/OF_GetFaceInfo
 	many faces its file holds, and the ascender, descender and line
 	height at the face's current pixel size.
 
-openfont.library/OF_GlyphAdvance                 openfont.library/OF_GlyphAdvance
+openfont.library/OF_GetFaceMetrics           openfont.library/OF_GetFaceMetrics
 
    NAME
-	OF_GlyphAdvance -- a glyph's advance in font units (V1, revision 1)
+	OF_GetFaceMetrics -- a face's measurements (V1, revision 3)
 
    SYNOPSIS
-	advance = OF_GlyphAdvance(face, glyph)
-	D0                        A0    D0
+	error = OF_GetFaceMetrics(face, metrics)
+	D0                        A0    A1
 
-	LONG OF_GlyphAdvance(struct OFFace *, ULONG);
+	LONG OF_GetFaceMetrics(struct OFFace *, struct OFFaceMetrics *);
 
    FUNCTION
-	The glyph's horizontal advance as the font gives it (hmtx), in
-	font units: OFFaceInfo's fi_UnitsPerEm to the em. Not scaled, not
-	shaped.
+	Fills metrics at the face's pixel size, in 26.6 pixels with y up:
+	the line's ascender, descender and gap (as OFFaceInfo's), the x and
+	capital heights (OS/2, or measured from 'x' and 'H'), the underline
+	and strikeout (post and OS/2), the widest advance and the space's.
 
    RESULT
-	advance - or -1 for a glyph the face doesn't have.
+	error - 0, or OFERR_ARGUMENT.
 
 openfont.library/OF_GetFallback                 openfont.library/OF_GetFallback
 
@@ -339,6 +376,107 @@ openfont.library/OF_GetFallback                 openfont.library/OF_GetFallback
 
    RESULT
 	f - or NULL past the end of the chain.
+
+openfont.library/OF_GetFontTable               openfont.library/OF_GetFontTable
+
+   NAME
+	OF_GetFontTable -- one of a face's tables (V1, revision 3)
+
+   SYNOPSIS
+	table = OF_GetFontTable(face, tag, length)
+	D0                      A0    D0   A1
+
+	CONST_APTR OF_GetFontTable(struct OFFace *, ULONG, ULONG *);
+
+   FUNCTION
+	The table tag ('MATH', 'OS/2', 'GSUB') as it is in the font file,
+	or NULL when the face has none. *length (when length is not NULL)
+	is its size in bytes. It lives as long as the face: don't change
+	or free it.
+
+openfont.library/OF_GlyphAdvance               openfont.library/OF_GlyphAdvance
+
+   NAME
+	OF_GlyphAdvance -- a glyph's advance in font units (V1, revision 1)
+
+   SYNOPSIS
+	advance = OF_GlyphAdvance(face, glyph)
+	D0                        A0    D0
+
+	LONG OF_GlyphAdvance(struct OFFace *, ULONG);
+
+   FUNCTION
+	The glyph's horizontal advance as the font gives it (hmtx), in
+	font units: OFFaceInfo's fi_UnitsPerEm to the em. Not scaled, not
+	shaped.
+
+   RESULT
+	advance - or -1 for a glyph the face doesn't have.
+
+openfont.library/OF_GlyphAdvancePx           openfont.library/OF_GlyphAdvancePx
+
+   NAME
+	OF_GlyphAdvancePx -- a glyph's advance at the face's size (V1, revision 3)
+
+   SYNOPSIS
+	advance = OF_GlyphAdvancePx(face, glyph)
+	D0                          A0    D0
+
+	LONG OF_GlyphAdvancePx(struct OFFace *, ULONG);
+
+   FUNCTION
+	The glyph's horizontal advance at the face's pixel size, in 26.6
+	pixels, unrounded, as shaping gives it before kerning. -1 for a
+	glyph the face doesn't have.
+
+openfont.library/OF_GlyphExtents               openfont.library/OF_GlyphExtents
+
+   NAME
+	OF_GlyphExtents -- a glyph's ink box (V1, revision 3)
+
+   SYNOPSIS
+	error = OF_GlyphExtents(face, glyph, extents)
+	D0                      A0    D0     A1
+
+	LONG OF_GlyphExtents(struct OFFace *, ULONG, struct OFGlyphExtents *);
+
+   FUNCTION
+	The box of the glyph's outline points at the face's size, in 26.6
+	pixels with y up: from the pen to its left edge, from the baseline
+	up to its top, its width and its height. All 0 for a space. A face
+	with no outlines gives its bitmap's box.
+
+   RESULT
+	error - 0, or OFERR_RANGE (no such glyph), OFERR_FONT,
+	        OFERR_MEMORY.
+
+openfont.library/OF_GlyphOutline               openfont.library/OF_GlyphOutline
+
+   NAME
+	OF_GlyphOutline -- a glyph's outline (V1, revision 3)
+
+   SYNOPSIS
+	error = OF_GlyphOutline(face, glyph, outline)
+	D0                      A0    D0     A1
+
+	LONG OF_GlyphOutline(struct OFFace *, ULONG, struct OFOutline *);
+
+   FUNCTION
+	The glyph's outline at the face's size as verbs and points, 26.6
+	pixels with y up, for a program that draws or clips with paths
+	(WebCore's text as paths, SVG, canvas). OFPV_MOVE and OFPV_LINE
+	take one point, OFPV_QUAD two (control, end), OFPV_CUBIC three,
+	OFPV_CLOSE none. Each contour begins with a move and ends with a
+	close. TrueType's implied on-curve points are made explicit.
+
+	The library fills ol_Verbs and ol_Points up to ol_MaxVerbs and
+	ol_MaxPoints (a point is two LONGs) and always sets ol_NumVerbs and
+	ol_NumPoints to the whole outline's, so a call with no buffers
+	measures.
+
+   RESULT
+	error - 0, OFERR_BUFFER when it did not all fit, OFERR_RANGE (no
+	        such glyph), OFERR_FONT, OFERR_MEMORY.
 
 openfont.library/OF_MeasureText                 openfont.library/OF_MeasureText
 
@@ -399,6 +537,31 @@ openfont.library/OF_OpenFaceA                     openfont.library/OF_OpenFaceA
 
    RESULT
 	face - or NULL.
+
+openfont.library/OF_OpenFaceMemoryA         openfont.library/OF_OpenFaceMemoryA
+
+   NAME
+	OF_OpenFaceMemoryA -- a face from a font in memory (V1, revision 3)
+	OF_OpenFaceMemory -- varargs stub
+
+   SYNOPSIS
+	face = OF_OpenFaceMemoryA(data, size, tags)
+	D0                        A0    D0    A1
+
+	struct OFFace *OF_OpenFaceMemoryA(CONST_APTR, ULONG, const struct TagItem *);
+	struct OFFace *OF_OpenFaceMemory(CONST_APTR, ULONG, Tag, ...);
+
+   FUNCTION
+	Opens a face from size bytes of a TrueType or OpenType font (or a
+	collection) at data, as a web font arrives. The face keeps its own
+	copy, so data may be freed at once. Any task may call it.
+
+   INPUTS
+	tags - OFA_Index, OFA_Size (16), OFA_Error.
+
+   RESULT
+	face - or NULL: OFERR_FONT (not a font it reads), OFERR_MEMORY,
+	       OFERR_ARGUMENT.
 
 openfont.library/OF_OpenTextFont               openfont.library/OF_OpenTextFont
 
@@ -514,6 +677,48 @@ openfont.library/OF_SetSize                         openfont.library/OF_SetSize
    FUNCTION
 	The size shaping, metrics and rasterising use from now on. A
 	fallback takes the size of the face it serves when it shapes.
+
+openfont.library/OF_ShapeA                           openfont.library/OF_ShapeA
+
+   NAME
+	OF_ShapeA -- shapes a run with a script, language, direction and features (V1, revision 3)
+	OF_Shape -- varargs stub
+
+   SYNOPSIS
+	count = OF_ShapeA(face, text, length, glyphs, capacity, tags)
+	D0                A0    A1    D0      A2      D1        A3
+
+	ULONG OF_ShapeA(struct OFFace *, CONST_APTR, ULONG, struct OFGlyph *,
+	                ULONG, const struct TagItem *);
+	ULONG OF_Shape(struct OFFace *, CONST_APTR, ULONG, struct OFGlyph *,
+	               ULONG, Tag, ...);
+
+   FUNCTION
+	Shapes the run [OFA_Offset, OFA_Offset + OFA_Length) of text, with
+	the whole text as its context, as OF_ShapeText does, and more:
+
+	- OFA_UTF16 TRUE: text is UTF-16 (UWORDs) and length, offsets,
+	  feature ranges and gl_Cluster count 16-bit units. A surrogate pair
+	  is one character; a lone surrogate is U+FFFD.
+	- OFA_Script: the run's ISO 15924 code ('Arab', 'Hebr', 'Latn');
+	  0 takes it from the text.
+	- OFA_Language: the OpenType language system ('TRK ', 'SRB '), for
+	  the font's own forms (locl); 0 the script's default.
+	- OFA_Direction: OFDIR_LTR, OFDIR_RTL, or OFDIR_AUTO (from the
+	  script). Right to left, mirrored characters take their mirrors
+	  and the glyphs still come left to right: the run's last character
+	  first.
+	- OFA_Features, OFA_NumFeatures: struct OFFeature, each turning a
+	  feature on (of_Value 1, or n for the n-th alternate) or off (0)
+	  over a range of the text, or all of it.
+
+	Arabic, Syriac, N'Ko, Mongolian and the other joining scripts join
+	(isol, fina, medi, init), and Hebrew points and Arabic harakat are
+	put in the order fonts expect. Fallbacks work as for OF_ShapeText.
+
+   RESULT
+	count - the glyphs the run has (up to capacity written); 0 on
+	        failure. Call with glyphs NULL to measure.
 
 openfont.library/OF_ShapeText                     openfont.library/OF_ShapeText
 
