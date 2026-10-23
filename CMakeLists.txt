@@ -4,33 +4,12 @@ project(OpenFont C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# The fonts are read and drawn by OpenFont's own code (src/of_*.c). HarfBuzz
-# still shapes until the shaper is ours: the system's (pkg-config), or one
-# built from its release's sources (OPENFONT_HARFBUZZ_SOURCE, the folder
-# harfbuzz-14.5.1.tar.xz unpacks to, as amiga/SOURCES pins it).
-set(OPENFONT_HARFBUZZ_SOURCE "" CACHE PATH "HarfBuzz sources to build, instead of the system's")
-if(OPENFONT_HARFBUZZ_SOURCE)
-    enable_language(CXX)
-    add_library(openfont_harfbuzz STATIC ${OPENFONT_HARFBUZZ_SOURCE}/src/harfbuzz.cc)
-    target_compile_features(openfont_harfbuzz PRIVATE cxx_std_17)
-    target_compile_options(openfont_harfbuzz PRIVATE -fno-exceptions -fno-rtti)
-    target_compile_definitions(openfont_harfbuzz PRIVATE HB_NO_MT)
-    target_include_directories(openfont_harfbuzz PUBLIC ${OPENFONT_HARFBUZZ_SOURCE}/src)
-    set(OPENFONT_HB openfont_harfbuzz)
-else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
-    set(OPENFONT_HB PkgConfig::HARFBUZZ)
-endif()
-
+# Fonts are read, shaped and drawn by OpenFont's own code (src/of_*.c); it
+# needs nothing but a C compiler.
 add_library(openfont STATIC src/openfont.c src/of_font.c src/of_cff.c src/of_raster.c
+            src/of_layout.c src/of_shape.c src/of_unicode_data.c
             src/openfont_cache.c src/openfont_io_stdio.c src/openfont_io_join.c src/openfont_io_posixdir.c src/openfont_index.c)
 target_include_directories(openfont PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(openfont PRIVATE ${OPENFONT_HB})
-if(OPENFONT_HARFBUZZ_SOURCE)
-    # HarfBuzz is C++: its runtime comes with it
-    set_target_properties(openfont PROPERTIES LINKER_LANGUAGE CXX)
-endif()
 
 add_executable(openfontcompile tools/openfontcompile.c)
 target_link_libraries(openfontcompile PRIVATE openfont)
@@ -77,6 +56,17 @@ if(OPENFONT_DEJAVU_DIR AND OPENFONT_LIBERATION_DIR)
              ${OPENFONT_DEJAVU_DIR} ${OPENFONT_LIBERATION_DIR})
 endif()
 
+# The Unicode properties and the shaper; with DejaVu Sans, shaping too.
+add_executable(test_shape tests/test_shape.c)
+target_include_directories(test_shape PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_shape PRIVATE openfont)
+add_test(NAME openfont_shape COMMAND test_shape)
+find_file(OPENFONT_DEJAVU_SANS NAMES DejaVuSans.ttf PATHS /usr/share/fonts/truetype/dejavu)
+if(OPENFONT_DEJAVU_SANS)
+    add_test(NAME openfont_shape_dejavu COMMAND test_shape ${OPENFONT_DEJAVU_SANS}
+             ${CMAKE_CURRENT_SOURCE_DIR}/tests/shape/latin.txt)
+endif()
+
 # The reader and rasteriser alone, on any fonts at hand (no reference).
 add_executable(test_reader tests/test_reader.c)
 target_include_directories(test_reader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -99,5 +89,26 @@ if(OPENFONT_FREETYPE_REF)
     target_link_libraries(compare_freetype PRIVATE ${OPENFONT_FREETYPE_REF}/build/libfreetype.a m)
     if(OPENFONT_TEST_FONT)
         add_test(NAME openfont_compare_freetype COMMAND compare_freetype ${OPENFONT_TEST_FONT} ${OPENFONT_TEST_OTF})
+    endif()
+endif()
+
+# The reference gate for the shaper: OpenFont against HarfBuzz, given
+# HarfBuzz's release sources (the folder harfbuzz-14.5.1.tar.xz unpacks to),
+# built here for this test only; nothing of HarfBuzz's is in OpenFont.
+set(OPENFONT_HARFBUZZ_REF "" CACHE PATH "HarfBuzz sources, for compare_harfbuzz")
+if(OPENFONT_HARFBUZZ_REF)
+    enable_language(CXX)
+    add_library(openfont_ref_harfbuzz STATIC ${OPENFONT_HARFBUZZ_REF}/src/harfbuzz.cc)
+    target_compile_features(openfont_ref_harfbuzz PRIVATE cxx_std_17)
+    target_compile_options(openfont_ref_harfbuzz PRIVATE -fno-exceptions -fno-rtti)
+    target_compile_definitions(openfont_ref_harfbuzz PRIVATE HB_NO_MT)
+    target_include_directories(openfont_ref_harfbuzz PUBLIC ${OPENFONT_HARFBUZZ_REF}/src)
+    add_executable(compare_harfbuzz tests/ref/compare_harfbuzz.c)
+    target_include_directories(compare_harfbuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(compare_harfbuzz PRIVATE openfont openfont_ref_harfbuzz)
+    set_target_properties(compare_harfbuzz PROPERTIES LINKER_LANGUAGE CXX)
+    if(OPENFONT_TEST_FONT)
+        add_test(NAME openfont_compare_harfbuzz COMMAND compare_harfbuzz
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/shape/latin.txt ${OPENFONT_TEST_FONT} ${OPENFONT_TEST_OTF})
     endif()
 endif()

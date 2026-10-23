@@ -1,9 +1,8 @@
 #!/bin/sh
 # Copyright (c) 2026 AmigaChrome Team. OpenFont, MIT licence (LICENSE).
 # openfont.library for AmigaOS 3.2 on the 68040, built with OpenAmigaGCC
-# 16.2.0-open2 (the os32-gcc16 stove's compiler). The fonts are read and
-# drawn by OpenFont's own code; HarfBuzz 14.5.1 is inside it for shaping,
-# until OpenFont's own shaper replaces it.
+# 16.2.0-open2 (the os32-gcc16 stove's compiler). Everything in it is
+# OpenFont's own code: no upstream sources are fetched.
 #
 #   amiga/build-library.sh [OUT_DIR]          (default build/amiga)
 #
@@ -11,19 +10,14 @@
 #              release unpacked under /opt)
 #   NDK        a folder of AmigaOS headers, when the compiler has none of
 #              its own: OpenNDK's Include_H (openamigasdk/OpenNDK/Include_H)
-#   TARBALLS   where the upstream sources are kept (default amiga/tarballs);
-#              each is checked against amiga/SOURCES, and fetched when
-#              missing
 #
-# Nothing upstream is ever committed: the sources are fetched and checked
-# here, and built in OUT_DIR/work.
+# It builds in OUT_DIR/work.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 OUT=${1:-$ROOT/build/amiga}
 WORK=$OUT/work
-TARBALLS=${TARBALLS:-$HERE/tarballs}
-mkdir -p "$OUT" "$WORK" "$TARBALLS"
+mkdir -p "$OUT" "$WORK"
 
 find_cc() {
     for d in "$HOME/AmigaChrome/stoves/os32-gcc16/bin" "$HOME/AmigaChrome/stoves/os32-gcc16/prefix/bin" \
@@ -44,45 +38,16 @@ NM=$(dirname "$CC")/m68k-amigaos-nm
 NDKFLAGS=
 [ -n "${NDK:-}" ] && NDKFLAGS="-I$NDK"
 
-# ---- the sources, checked against SOURCES ----
-src_line() { grep "^$1 " "$HERE/SOURCES"; }
-fetch() {   # NAME: the tarball named in SOURCES, fetched if missing, then checked
-    set -- $(src_line "$1")
-    t="$TARBALLS/$2"
-    if [ ! -f "$t" ]; then
-        echo "fetching $4"
-        curl -sSfL -o "$t.part" "$4" && mv "$t.part" "$t" || { rm -f "$t.part"; return 1; }
-    fi
-    echo "$3  $t" | sha256sum -c - >/dev/null || { echo "SHA-256 mismatch: $t" >&2; exit 2; }
-}
-
-rm -rf "$WORK/harfbuzz"
-fetch harfbuzz
-set -- $(src_line harfbuzz)
-mkdir -p "$WORK/harfbuzz" && tar -xJf "$TARBALLS/$2" -C "$WORK/harfbuzz" --strip-components=1
-
 CPU="-m68040 -m68881"   # the 68040 and its own FPU (-m68040 alone gives soft float)
 COMMON="$CPU -O2 -fno-delete-null-pointer-checks -fno-common -ffunction-sections -fdata-sections -DNDEBUG"
-
-HB=$WORK/harfbuzz
 OBJ=$WORK/obj
+rm -rf "$OBJ"
 mkdir -p "$OBJ"
-# SKIP_ENGINES=1 keeps HarfBuzz's object from the last build (it takes most
-# of the time) and rebuilds only OpenFont's own
-if [ "${SKIP_ENGINES:-0}" != 1 ] || [ ! -f "$OBJ/harfbuzz.o" ]; then
-rm -f "$OBJ"/*.o
-
-# ---- HarfBuzz: one file, single-threaded under the library's lock ----
-HBFLAGS="-std=c++17 -Wno-attributes -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit \
- -DHB_NO_MT -DHB_NO_ATEXIT -DHB_NO_GETENV -DHB_NO_SETLOCALE \
- -DHB_NO_BUFFER_SERIALIZE -DHB_NO_BUFFER_MESSAGE -DHB_NO_BUFFER_VERIFY -DHB_NO_CAIRO \
- -DHB_NO_OPEN -DHB_NO_MMAP -DHB_NO_ERRNO"
-"$CXX" $COMMON $NDKFLAGS $HBFLAGS -c "$HB/src/harfbuzz.cc" -o "$OBJ/harfbuzz.o"
-fi
 
 # ---- OpenFont: the core, the index, and the library around them ----
-OFFLAGS="-std=gnu99 -Wall -Wextra -Werror -I$ROOT/include -I$ROOT/src -I$ROOT/library -I$HB/src"
-for f in src/openfont src/of_font src/of_cff src/of_raster src/openfont_cache src/openfont_index src/openfont_io_join; do
+OFFLAGS="-std=gnu99 -Wall -Wextra -Werror -I$ROOT/include -I$ROOT/src -I$ROOT/library"
+for f in src/openfont src/of_font src/of_cff src/of_raster src/of_layout src/of_shape src/of_unicode_data \
+         src/openfont_cache src/openfont_index src/openfont_io_join; do
     "$CC" $COMMON $NDKFLAGS $OFFLAGS -c "$ROOT/$f.c" -o "$OBJ/of_$(basename "$f").o"
 done
 # The library's own files include the OS headers. devices/timer.h defines
@@ -109,7 +74,7 @@ bad=$("$NM" "$OBJ/of_diskfont_core.o" "$OBJ/of_bullet_core.o" | awk '{print $NF}
 # ---- linking: no C startup; libnix only for its stateless functions ----
 "$CC" $CPU -nostartfiles -Wl,--gc-sections -Wl,-Map,"$OUT/openfont.library.map" \
     -o "$OUT/openfont.library" \
-    "$OBJ/aa_openfont_lib.o" "$OBJ"/of_*.o "$OBJ/harfbuzz.o" \
+    "$OBJ/aa_openfont_lib.o" "$OBJ"/of_*.o \
     -lc -lm -lgcc
 "$NM" -u "$OUT/openfont.library" > "$OUT/undefined.txt" || true
 # the first code in the file must be start(), which returns at once when
@@ -128,7 +93,7 @@ sha256sum "$OUT/openfont.library"
 # the licences that go with the library wherever it is copied
 mkdir -p "$OUT/licences"
 cp "$ROOT/LICENSE" "$OUT/licences/OpenFont.txt"
-cp "$HB/COPYING" "$OUT/licences/HarfBuzz.txt"
+cp "$ROOT/LICENSES/Unicode-License-v3.txt" "$OUT/licences/Unicode.txt"
 
 # ---- the SDK's link library (the varargs calls), and the lab test ----
 SDKFLAGS="$CPU -O2 -Wall -Wextra -Werror -fno-delete-null-pointer-checks $NDKFLAGS -I$ROOT/sdk/Include_H"
