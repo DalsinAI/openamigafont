@@ -67,6 +67,12 @@ int of_index_scan(OFIndex *ix, OFContext *ctx);
 const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
                                   uint16_t weight, int italic);
 
+/* The family itself or one of its aliases, as of_index_find tries them
+ * first; NULL when neither is installed, so that a program with its own
+ * list of families (CSS font-family) can go on to the next. */
+const OFIndexEntry *of_index_find_exact(const OFIndex *ix, const char *family,
+                                        uint16_t weight, int italic);
+
 /* Sets the user's aliases ("Name=Family,Family" lines) and the default
  * fallback chain ("Family,Family"). Either may be NULL to keep it. */
 void of_index_configure(OFIndex *ix, const char *aliases, const char *fallbacks);
@@ -77,6 +83,12 @@ void of_index_configure(OFIndex *ix, const char *aliases, const char *fallbacks)
  * indexed, or what opening the face gave. */
 OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
                       uint16_t weight, int italic, int with_fallbacks, int *error);
+
+/* of_index_open, and with exact set only the family or its aliases
+ * (of_index_find_exact): *error OF_ERR_FONT when neither is installed. */
+OFFace *of_index_open_family(const OFIndex *ix, OFContext *ctx, const char *family,
+                             uint16_t weight, int italic, int with_fallbacks, int exact,
+                             int *error);
 
 /* Opens a face that has a glyph for codepoint: the default fallback
  * chain's families first, then every family's best face for weight and

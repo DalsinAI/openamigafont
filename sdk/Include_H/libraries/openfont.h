@@ -94,6 +94,8 @@ struct OFFaceInfo {
 #define OFA_Offset    (OFA_Dummy + 12)  /* ULONG: the run's start in the text, in its units (0) */
 #define OFA_Length    (OFA_Dummy + 13)  /* ULONG: the run's length (to the end of the text) */
 #define OFA_UTF16     (OFA_Dummy + 14)  /* BOOL: the text is UTF-16 (UWORDs), lengths and clusters in units (FALSE) */
+/* Tag for OF_FindFaceA (revision 3) */
+#define OFA_Exact     (OFA_Dummy + 15)  /* BOOL: only the family or its aliases, else NULL with OFERR_FONT (FALSE) */
 
 /* OFA_Direction */
 #define OFDIR_AUTO 0    /* from the run's script */

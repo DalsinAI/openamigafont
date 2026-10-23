@@ -259,8 +259,12 @@ openfont.library/OF_FindFaceA                     openfont.library/OF_FindFaceA
 	Opens the face of the installed fonts that best matches family,
 	weight and slant: the family itself, then the user's aliases, then
 	OpenFont's own, then the generic family sans-serif. The default
-	fallback chain is added unless OFA_Fallbacks is FALSE. Brings the
-	font index up to date first if a folder has changed.
+	fallback chain is added unless OFA_Fallbacks is FALSE. With
+	OFA_Exact TRUE (revision 3) it stops after the aliases and returns
+	NULL when neither the family nor an alias of it is installed, for
+	programs with their own list of families to try, such as a browser
+	with CSS font-family. Brings the font index up to date first if a
+	folder has changed.
 
 	Must be called from a process.
 
@@ -269,7 +273,8 @@ openfont.library/OF_FindFaceA                     openfont.library/OF_FindFaceA
 	         generic family ("sans-serif", "serif", "monospace"). NULL
 	         means sans-serif.
 	tags - OFA_Weight (ULONG, 400), OFA_Italic (BOOL, FALSE),
-	       OFA_Size (ULONG, 16), OFA_Fallbacks (BOOL, TRUE),
+	       OFA_Size (ULONG, 16; 0 keeps the face's own),
+	       OFA_Fallbacks (BOOL, TRUE), OFA_Exact (BOOL, FALSE),
 	       OFA_Error (LONG *): OFERR_FONT when no font is installed,
 	       or why the face chosen did not open (as OF_OpenFaceA).
 

@@ -607,6 +607,21 @@ static const OFIndexEntry *best_of_builtin(const OFIndex *ix, const char *name,
     return NULL;
 }
 
+const OFIndexEntry *of_index_find_exact(const OFIndex *ix, const char *family,
+                                        uint16_t weight, int italic)
+{
+    const OFIndexEntry *e;
+    if (!ix || !ix->count || !family || !*family)
+        return NULL;
+    if (!weight)
+        weight = 400;
+    if ((e = best_of_family(ix, family, strlen(family), weight, italic)) != NULL)
+        return e;
+    if ((e = best_of_alias(ix, ix->aliases, family, weight, italic)) != NULL)
+        return e;
+    return best_of_builtin(ix, family, weight, italic);
+}
+
 const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
                                   uint16_t weight, int italic)
 {
@@ -615,14 +630,8 @@ const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
         return NULL;
     if (!weight)
         weight = 400;
-    if (family && *family) {
-        if ((e = best_of_family(ix, family, strlen(family), weight, italic)) != NULL)
-            return e;
-        if ((e = best_of_alias(ix, ix->aliases, family, weight, italic)) != NULL)
-            return e;
-        if ((e = best_of_builtin(ix, family, weight, italic)) != NULL)
-            return e;
-    }
+    if ((e = of_index_find_exact(ix, family, weight, italic)) != NULL)
+        return e;
     if ((e = best_of_alias(ix, ix->aliases, "sans-serif", weight, italic)) != NULL)
         return e;
     if ((e = best_of_builtin(ix, "sans-serif", weight, italic)) != NULL)
@@ -633,7 +642,15 @@ const OFIndexEntry *of_index_find(const OFIndex *ix, const char *family,
 OFFace *of_index_open(const OFIndex *ix, OFContext *ctx, const char *family,
                       uint16_t weight, int italic, int with_fallbacks, int *error)
 {
-    const OFIndexEntry *e = of_index_find(ix, family, weight, italic);
+    return of_index_open_family(ix, ctx, family, weight, italic, with_fallbacks, 0, error);
+}
+
+OFFace *of_index_open_family(const OFIndex *ix, OFContext *ctx, const char *family,
+                             uint16_t weight, int italic, int with_fallbacks, int exact,
+                             int *error)
+{
+    const OFIndexEntry *e = exact ? of_index_find_exact(ix, family, weight, italic)
+                                  : of_index_find(ix, family, weight, italic);
     OFFace *face;
     const char *p, *end;
     int dummy;

@@ -70,6 +70,7 @@ int start(void)
 #define OFA_Offset    (OFA_Dummy + 12)
 #define OFA_Length    (OFA_Dummy + 13)
 #define OFA_UTF16     (OFA_Dummy + 14)
+#define OFA_Exact     (OFA_Dummy + 15)
 #define OFERR_NOTPROCESS -9
 
 /* OF_GlyphOutline's buffers, as the SDK header's struct OFOutline */
@@ -300,13 +301,15 @@ static long w_find_face(void *base, void *arg)
     ULONG italic = GetTagData(OFA_Italic, FALSE, (struct TagItem *)a->tags);
     ULONG fallbacks = GetTagData(OFA_Fallbacks, TRUE, (struct TagItem *)a->tags);
     ULONG size = GetTagData(OFA_Size, 16, (struct TagItem *)a->tags);
+    ULONG exact = GetTagData(OFA_Exact, FALSE, (struct TagItem *)a->tags);
     OFFace *face;
     int rc = refresh_index(b, 0);
     if (rc != OF_OK) {
         set_error(a->tags, rc);
         return 0;
     }
-    face = of_index_open(&b->index, b->ctx, a->path, (uint16_t)weight, italic != 0, fallbacks != 0, &rc);
+    face = of_index_open_family(&b->index, b->ctx, a->path, (uint16_t)weight, italic != 0,
+                                fallbacks != 0, exact != 0, &rc);
     if (!face) {
         set_error(a->tags, rc);      /* no fonts (OF_ERR_FONT), or what opening gave */
         return 0;

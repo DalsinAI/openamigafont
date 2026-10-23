@@ -303,6 +303,18 @@ int main(void)
         check(0, "OF_FindFace(\"monospace\")");
     }
 
+    /* OFA_Exact: a family that isn't installed is none, an alias still counts */
+    if (OpenFontBase->lib_Revision >= 3) {
+        found = OF_FindFace((CONST_STRPTR)"No Such Family", OFA_Exact, TRUE, OFA_Fallbacks, FALSE, TAG_END);
+        check(found == NULL, "OF_FindFace(OFA_Exact) of a family not installed");
+        if (found)
+            OF_CloseFace(found);
+        found = OF_FindFace((CONST_STRPTR)"Arial", OFA_Exact, TRUE, OFA_Fallbacks, FALSE, TAG_END);
+        check(found != NULL, "OF_FindFace(OFA_Exact) of an alias");
+        if (found)
+            OF_CloseFace(found);
+    }
+
     /* a plain task gets OFERR_NOTPROCESS, and the library stays usable */
     {
         struct Task *t;
