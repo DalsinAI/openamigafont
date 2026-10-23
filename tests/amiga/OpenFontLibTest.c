@@ -2,10 +2,11 @@
  *
  *   OpenFontLibTest FONT/A,FONTDIR/A,CACHE,OUTLINE/K
  *
- * FONT is DejaVuSans.ttf: the shaping and raster hash must be the one the
- * host's tests/test_openfont.c prints for it at 16 pixels (EXPECT below),
- * since both run OpenFont's own reader and rasteriser (integers only) and
- * HarfBuzz 14.5.1. FONTDIR holds DejaVu
+ * FONT is DejaVuSans.ttf: the shaping and raster hash, and the layout
+ * hash of revision 3's calls, must be the ones the host's
+ * tests/test_openfont.c prints for it at 16 pixels (EXPECT below), since
+ * both run OpenFont's own reader, shaper and rasteriser (integers only).
+ * FONTDIR holds DejaVu
  * and Liberation, for the index, the aliases and fallback. CACHE is an
  * .ofc file openfontcompile made on the host from FONT (sizes 9 12 16 24).
  * OUTLINE is an outline .font in FONTS: whose .otag names a TrueType or
@@ -35,6 +36,8 @@
 #define EXPECT_GLYPHS 13
 #define EXPECT_ADVANCE 8155
 #define EXPECT_HASH 0x3a37fb49UL
+/* and its LAYOUT line: revision 3's calls */
+#define EXPECT_LAYOUT_HASH 0xc78fcff5UL
 
 struct Library *OpenFontBase;
 struct GfxBase *GfxBase;
@@ -142,6 +145,106 @@ int main(void)
         OF_FreeBitmap(&bm);
         check(OF_CharIndex(face, 'A') != 0 && OF_CharIndex(face, 0x10FFFD) == 0, "OF_CharIndex");
 
+        /* revision 3: what a layout engine asks */
+        check(OpenFontBase->lib_Revision >= OPENFONT_REVISION_LAYOUT, "openfont.library 1.3: OF_ShapeA");
+        check(sizeof(struct OFFeature) == 16 && sizeof(struct OFFaceMetrics) == 56 &&
+              sizeof(struct OFGlyphExtents) == 16 && sizeof(struct OFOutline) == 24,
+              "revision 3's structure sizes");
+        if (OpenFontBase->lib_Revision >= OPENFONT_REVISION_LAYOUT) {
+            static const UWORD rtl[] = { 0x0645, 0x0631, 0x062D, 0x0628, 0x0627, 0x0020, 0x05E9, 0x05DC, 0x05D5, 0x05DD };
+            static const UWORD latin[] = { 'o', 'f', 'f', 'i', 'c', 'e' };
+            struct OFFeature noliga = { OF_MAKETAG('l', 'i', 'g', 'a'), 0, 0, OF_FEATURE_END };
+            struct OFFaceMetrics m;
+            struct OFGlyphExtents e;
+            struct OFOutline ol;
+            static UBYTE verbs[256];
+            static LONG pts[512];
+            ULONG lh = 2166136261UL, tlen = 0, k, no = OF_CharIndex(face, 'O');
+            LONG rc;
+            n = OF_Shape(face, rtl, 10, glyphs, 64, OFA_UTF16, TRUE, OFA_Direction, OFDIR_RTL, TAG_END);
+            check(n == 10 && glyphs[0].gl_Cluster == 9 && glyphs[n - 1].gl_Cluster == 0,
+                  "OF_Shape: UTF-16, right to left, in visual order");
+            for (i = 0; i < n && i < 64; ++i) {
+                lh = hash_u32(lh, glyphs[i].gl_Glyph);
+                lh = hash_u32(lh, glyphs[i].gl_Cluster);
+                lh = hash_u32(lh, (ULONG)glyphs[i].gl_XAdvance);
+            }
+            n = OF_Shape(face, latin, 6, glyphs, 64, OFA_UTF16, TRUE, OFA_Features, (ULONG)&noliga,
+                         OFA_NumFeatures, 1, TAG_END);
+            check(n == 6, "OF_Shape: 'liga' off keeps every letter");
+            lh = hash_u32(lh, n);
+            check(OF_GetFaceMetrics(face, &m) == OFERR_OK && m.fm_XHeight > 0 && m.fm_CapHeight > m.fm_XHeight,
+                  "OF_GetFaceMetrics");
+            lh = hash_u32(lh, (ULONG)m.fm_Ascender);
+            lh = hash_u32(lh, (ULONG)m.fm_Descender);
+            lh = hash_u32(lh, (ULONG)m.fm_XHeight);
+            lh = hash_u32(lh, (ULONG)m.fm_CapHeight);
+            lh = hash_u32(lh, (ULONG)m.fm_UnderlinePosition);
+            memset(&ol, 0, sizeof ol);
+            rc = OF_GlyphOutline(face, no, &ol);
+            check(rc == OFERR_BUFFER && ol.ol_NumVerbs > 0, "OF_GlyphOutline measures");
+            ol.ol_Verbs = verbs;
+            ol.ol_Points = pts;
+            ol.ol_MaxVerbs = 256;
+            ol.ol_MaxPoints = 256;
+            rc = OF_GlyphOutline(face, no, &ol);
+            check(rc == OFERR_OK && verbs[0] == OFPV_MOVE && verbs[ol.ol_NumVerbs - 1] == OFPV_CLOSE,
+                  "OF_GlyphOutline: 'O'");
+            lh = hash_u32(lh, ol.ol_NumVerbs);
+            lh = hash_u32(lh, ol.ol_NumPoints);
+            for (k = 0; k < ol.ol_NumPoints && k < 256; ++k) {
+                lh = hash_u32(lh, (ULONG)pts[2 * k]);
+                lh = hash_u32(lh, (ULONG)pts[2 * k + 1]);
+            }
+            check(OF_GlyphExtents(face, no, &e) == OFERR_OK && e.ge_Width > 0 && e.ge_Height > 0,
+                  "OF_GlyphExtents");
+            lh = hash_u32(lh, (ULONG)e.ge_XBearing);
+            lh = hash_u32(lh, (ULONG)e.ge_YBearing);
+            lh = hash_u32(lh, (ULONG)e.ge_Width);
+            lh = hash_u32(lh, (ULONG)e.ge_Height);
+            check(OF_GetFontTable(face, OF_MAKETAG('h', 'e', 'a', 'd'), &tlen) != NULL && tlen == 54,
+                  "OF_GetFontTable('head')");
+            lh = hash_u32(lh, tlen);
+            check(OF_GlyphAdvancePx(face, no) == glyphs[0].gl_XAdvance || OF_GlyphAdvancePx(face, no) > 0,
+                  "OF_GlyphAdvancePx");
+            printf("     layout hash=%08lx\n", (unsigned long)lh);
+            check(lh == EXPECT_LAYOUT_HASH, "revision 3's results match the host byte for byte");
+
+            /* a face from memory, as a web font comes */
+            {
+                BPTR fh = Open((CONST_STRPTR)args[0], MODE_OLDFILE);
+                LONG size = 0;
+                UBYTE *mem = NULL;
+                if (fh) {
+                    Seek(fh, 0, OFFSET_END);
+                    size = Seek(fh, 0, OFFSET_BEGINNING);
+                    mem = size > 0 ? (UBYTE *)AllocVec((ULONG)size, MEMF_ANY) : NULL;
+                    if (mem && Read(fh, mem, size) != size) {
+                        FreeVec(mem);
+                        mem = NULL;
+                    }
+                    Close(fh);
+                }
+                if (mem) {
+                    struct OFFace *mf;
+                    err = 99;
+                    mf = OF_OpenFaceMemory(mem, (ULONG)size, OFA_Size, 16, OFA_Error, (ULONG)&err, TAG_END);
+                    FreeVec(mem);   /* the face keeps its own copy */
+                    check(mf != NULL && err == OFERR_OK, "OF_OpenFaceMemory");
+                    if (mf) {
+                        check(OF_MeasureText(mf, (CONST_STRPTR)text, strlen(text)) == EXPECT_ADVANCE,
+                              "the face from memory measures as the file's");
+                        OF_CloseFace(mf);
+                    }
+                    err = 0;
+                    check(OF_OpenFaceMemory("not a font", 10, OFA_Error, (ULONG)&err, TAG_END) == NULL &&
+                          err == OFERR_FONT, "OF_OpenFaceMemory: not a font");
+                } else {
+                    check(0, "reading the font into memory");
+                }
+            }
+        }
+
         if (args[2]) {
             struct OFCache *c = OF_OpenCache((CONST_STRPTR)args[2]);
             ULONG gid = 0;
@@ -183,6 +286,13 @@ int main(void)
         }
         OF_CloseFace(found);
     }
+    if (OpenFontBase->lib_Revision >= OPENFONT_REVISION_LAYOUT) {
+        found = OF_FindFaceForChar(0x2603, OFA_Size, 16, TAG_END);
+        check(found != NULL && OF_CharIndex(found, 0x2603) != 0, "OF_FindFaceForChar(U+2603)");
+        if (found)
+            OF_CloseFace(found);
+        check(OF_FindFaceForChar(0x10FFFD, TAG_END) == NULL, "OF_FindFaceForChar: none has it");
+    }
     found = OF_FindFace((CONST_STRPTR)"monospace", OFA_Weight, 700, TAG_END);
     if (found) {
         OF_GetFaceInfo(found, &info);
@@ -191,6 +301,18 @@ int main(void)
         OF_CloseFace(found);
     } else {
         check(0, "OF_FindFace(\"monospace\")");
+    }
+
+    /* OFA_Exact: a family that isn't installed is none, an alias still counts */
+    if (OpenFontBase->lib_Revision >= 3) {
+        found = OF_FindFace((CONST_STRPTR)"No Such Family", OFA_Exact, TRUE, OFA_Fallbacks, FALSE, TAG_END);
+        check(found == NULL, "OF_FindFace(OFA_Exact) of a family not installed");
+        if (found)
+            OF_CloseFace(found);
+        found = OF_FindFace((CONST_STRPTR)"Arial", OFA_Exact, TRUE, OFA_Fallbacks, FALSE, TAG_END);
+        check(found != NULL, "OF_FindFace(OFA_Exact) of an alias");
+        if (found)
+            OF_CloseFace(found);
     }
 
     /* a plain task gets OFERR_NOTPROCESS, and the library stays usable */

@@ -41,6 +41,17 @@ LONG OF_RescanFonts(VOID);
 LONG OF_RasterGlyphMatrix(struct OFFace * face, ULONG glyph, CONST LONG * matrix, struct OFBitmap * bitmap);
 LONG OF_GlyphAdvance(struct OFFace * face, ULONG glyph);
 struct TextFont * OF_OpenTextFont(CONST struct TextAttr * textAttr);
+ULONG OF_ShapeA(struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, CONST struct TagItem * tags);
+ULONG OF_Shape(struct OFFace * face, CONST_APTR text, ULONG length, struct OFGlyph * glyphs, ULONG capacity, Tag tag1, ...);
+LONG OF_GetFaceMetrics(struct OFFace * face, struct OFFaceMetrics * metrics);
+LONG OF_GlyphOutline(struct OFFace * face, ULONG glyph, struct OFOutline * outline);
+LONG OF_GlyphExtents(struct OFFace * face, ULONG glyph, struct OFGlyphExtents * extents);
+CONST_APTR OF_GetFontTable(struct OFFace * face, ULONG tag, ULONG * length);
+struct OFFace * OF_OpenFaceMemoryA(CONST_APTR data, ULONG size, CONST struct TagItem * tags);
+struct OFFace * OF_OpenFaceMemory(CONST_APTR data, ULONG size, Tag tag1, ...);
+struct OFFace * OF_FindFaceForCharA(ULONG codepoint, CONST struct TagItem * tags);
+struct OFFace * OF_FindFaceForChar(ULONG codepoint, Tag tag1, ...);
+LONG OF_GlyphAdvancePx(struct OFFace * face, ULONG glyph);
 
 #ifdef __cplusplus
 }

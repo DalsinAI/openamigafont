@@ -27,5 +27,13 @@ _LVOOF_RescanFonts	EQU	-144
 _LVOOF_RasterGlyphMatrix	EQU	-150
 _LVOOF_GlyphAdvance	EQU	-156
 _LVOOF_OpenTextFont	EQU	-162
+_LVOOF_ShapeA	EQU	-168
+_LVOOF_GetFaceMetrics	EQU	-174
+_LVOOF_GlyphOutline	EQU	-180
+_LVOOF_GlyphExtents	EQU	-186
+_LVOOF_GetFontTable	EQU	-192
+_LVOOF_OpenFaceMemoryA	EQU	-198
+_LVOOF_FindFaceForCharA	EQU	-204
+_LVOOF_GlyphAdvancePx	EQU	-210
 
 	ENDC	; LVO_OPENFONT_LIB_I

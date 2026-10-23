@@ -55,6 +55,11 @@ int main(int argc, char **argv)
     expect(e && (e->flags & OF_FACE_ITALIC), "serif italic");
     e = of_index_find(&ix, "No Such Family", 400, 0);
     expect(e && !strcmp(e->family, "DejaVu Sans"), "unknown goes to sans-serif");
+    expect(!of_index_find_exact(&ix, "No Such Family", 400, 0), "exact: unknown is none");
+    e = of_index_find_exact(&ix, "Arial", 700, 0);
+    expect(e && !strcmp(e->family, "Liberation Sans") && e->weight == 700, "exact: Arial's alias");
+    e = of_index_find_exact(&ix, "serif", 400, 0);
+    expect(e && !strcmp(e->family, "DejaVu Serif"), "exact: a generic family");
     of_index_configure(&ix, "Comic=Liberation Mono\n", NULL);
     e = of_index_find(&ix, "Comic", 400, 0);
     expect(e && !strcmp(e->family, "Liberation Mono"), "the user's alias");

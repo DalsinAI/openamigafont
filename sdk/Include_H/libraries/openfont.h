@@ -20,6 +20,7 @@
 #define OPENFONTNAME "openfont.library"
 #define OPENFONT_VERSION 1
 #define OPENFONT_REVISION_TEXTFONT 2   /* lib_Revision with OF_OpenTextFont */
+#define OPENFONT_REVISION_LAYOUT 3     /* lib_Revision with OF_ShapeA and the calls after it */
 
 /* A face (one font of a file) and a compiled glyph cache: opaque. */
 struct OFFace;
@@ -84,6 +85,80 @@ struct OFFaceInfo {
 #define OFA_Italic    (OFA_Dummy + 4)   /* BOOL (FALSE); OF_FindFaceA */
 #define OFA_Fallbacks (OFA_Dummy + 5)   /* BOOL: add the default fallback chain (TRUE); OF_FindFaceA */
 #define OFA_Error     (OFA_Dummy + 6)   /* LONG *: why it failed, an OFERR_ code */
+/* Tags for OF_ShapeA (revision 3) */
+#define OFA_Script    (OFA_Dummy + 7)   /* ULONG: ISO 15924 code as a tag ('Arab'); 0 from the text */
+#define OFA_Language  (OFA_Dummy + 8)   /* ULONG: OpenType language system tag ('TRK '); 0 the default */
+#define OFA_Direction (OFA_Dummy + 9)   /* ULONG: OFDIR_ below (OFDIR_AUTO) */
+#define OFA_Features  (OFA_Dummy + 10)  /* struct OFFeature *: features to turn on or off */
+#define OFA_NumFeatures (OFA_Dummy + 11) /* ULONG: how many (up to OF_MAX_FEATURES) */
+#define OFA_Offset    (OFA_Dummy + 12)  /* ULONG: the run's start in the text, in its units (0) */
+#define OFA_Length    (OFA_Dummy + 13)  /* ULONG: the run's length (to the end of the text) */
+#define OFA_UTF16     (OFA_Dummy + 14)  /* BOOL: the text is UTF-16 (UWORDs), lengths and clusters in units (FALSE) */
+/* Tag for OF_FindFaceA (revision 3) */
+#define OFA_Exact     (OFA_Dummy + 15)  /* BOOL: only the family or its aliases, else NULL with OFERR_FONT (FALSE) */
+
+/* OFA_Direction */
+#define OFDIR_AUTO 0    /* from the run's script */
+#define OFDIR_LTR  1
+#define OFDIR_RTL  2    /* glyphs still come left to right, the run's last character first */
+
+/* An OpenType feature over [of_Start, of_End) of the text, in its units
+ * from the start of the whole text; 0 and OF_FEATURE_END cover all of it.
+ * of_Value 0 turns it off, 1 on, n picks the n-th alternate. */
+#define OF_FEATURE_END 0xFFFFFFFFUL
+#define OF_MAKETAG(a, b, c, d) (((ULONG)(a) << 24) | ((ULONG)(b) << 16) | ((ULONG)(c) << 8) | (ULONG)(d))
+#define OF_MAX_FEATURES 32
+struct OFFeature {
+    ULONG of_Tag;           /* 'liga', 'smcp' */
+    ULONG of_Value;
+    ULONG of_Start;
+    ULONG of_End;
+};                          /* 16 bytes */
+
+/* A face's measurements at its pixel size: 26.6 pixels, y up */
+struct OFFaceMetrics {
+    ULONG fm_UnitsPerEm;
+    ULONG fm_PixelSize;
+    LONG fm_Ascender;
+    LONG fm_Descender;          /* negative below the baseline */
+    LONG fm_LineGap;
+    LONG fm_XHeight;            /* OS/2, else measured from 'x' */
+    LONG fm_CapHeight;          /* OS/2, else measured from 'H' */
+    LONG fm_UnderlinePosition;  /* the top of the underline, negative below */
+    LONG fm_UnderlineThickness;
+    LONG fm_StrikeoutPosition;
+    LONG fm_StrikeoutThickness;
+    LONG fm_MaxAdvance;
+    LONG fm_SpaceAdvance;       /* U+0020's, 0 when it has none */
+    ULONG fm_Flags;             /* OFFF_ above */
+};                              /* 56 bytes */
+
+/* A glyph's ink box at the face's size: 26.6 pixels, y up */
+struct OFGlyphExtents {
+    LONG ge_XBearing;           /* from the pen to the box's left edge */
+    LONG ge_YBearing;           /* from the baseline up to its top */
+    LONG ge_Width;
+    LONG ge_Height;
+};                              /* 16 bytes */
+
+/* A glyph's outline, for OF_GlyphOutline: verbs (OFPV_ below) and points
+ * (x, y pairs of LONGs, 26.6 pixels at the face's size, y up). The
+ * library fills what fits and always sets ol_NumVerbs and ol_NumPoints to
+ * the whole outline's, returning OFERR_BUFFER when it did not fit. */
+struct OFOutline {
+    UBYTE *ol_Verbs;
+    LONG *ol_Points;
+    ULONG ol_MaxVerbs;
+    ULONG ol_MaxPoints;         /* points: pairs, so ol_Points holds twice as many LONGs */
+    ULONG ol_NumVerbs;
+    ULONG ol_NumPoints;
+};                              /* 24 bytes */
+
+#define OFPV_MOVE  0    /* one point */
+#define OFPV_LINE  1    /* one point */
+#define OFPV_QUAD  2    /* two: control, end */
+#define OFPV_CUBIC 3    /* three: control, control, end */
+#define OFPV_CLOSE 4    /* none */
 
 /* Errors */
 #define OFERR_OK        0

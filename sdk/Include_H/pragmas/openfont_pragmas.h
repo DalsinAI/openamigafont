@@ -34,5 +34,16 @@
 #pragma libcall OpenFontBase OF_RasterGlyphMatrix 96 a90804
 #pragma libcall OpenFontBase OF_GlyphAdvance 9c 0802
 #pragma libcall OpenFontBase OF_OpenTextFont a2 801
+#pragma libcall OpenFontBase OF_ShapeA a8 b1a09806
+#pragma tagcall OpenFontBase OF_Shape a8 b1a09806
+#pragma libcall OpenFontBase OF_GetFaceMetrics ae 9802
+#pragma libcall OpenFontBase OF_GlyphOutline b4 90803
+#pragma libcall OpenFontBase OF_GlyphExtents ba 90803
+#pragma libcall OpenFontBase OF_GetFontTable c0 90803
+#pragma libcall OpenFontBase OF_OpenFaceMemoryA c6 90803
+#pragma tagcall OpenFontBase OF_OpenFaceMemory c6 90803
+#pragma libcall OpenFontBase OF_FindFaceForCharA cc 8002
+#pragma tagcall OpenFontBase OF_FindFaceForChar cc 8002
+#pragma libcall OpenFontBase OF_GlyphAdvancePx d2 0802
 
 #endif /* PRAGMAS_OPENFONT_PRAGMAS_H */

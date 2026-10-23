@@ -20,7 +20,9 @@ Unicode Standard), never from their code:
 
 1. the font reader and the rasteriser (FreeType out): done, 17 October 2026;
 2. the shaper for Latin (cmap, GPOS pair kerning and `kern`, GSUB ligatures,
-   simple mark attachment), HarfBuzz out;
+   simple mark attachment), HarfBuzz out: done, 17 October 2026 (on main
+   with openfont.library 1.3, 23 October 2026); scripts, languages, right to
+   left, joining and features for WebCore: done, 23 October 2026;
 3. the text functions: UTF-8/16, Unicode properties from the UCD, line breaks
    (UAX #14), grapheme and word boundaries (UAX #29), NFC and IDNA, so
    OpenFont is the one place for them and can later take ICU's place for
@@ -79,16 +81,16 @@ reports both the CPU and its FPU: not on another CPU, nor on an LC040. Version 1
 preview: its calls and structures may change. Version 2 freezes them, once the
 tests in §7 pass on a lab and on real 68040 hardware.
 
-**One lock.** HarfBuzz and the core keep state in the faces and the library, so
+**One lock.** The core keeps state in the faces and the library, so
 every call takes one SignalSemaphore and runs alone. The semaphore nests, so a
 task already inside the library does not wait for itself.
 
-**Its own stack.** HarfBuzz's shaping needs more stack
+**Its own stack.** Shaping and rasterising need more stack
 than an Amiga program is given. Each outermost call swaps (`StackSwap`) to a
 64 KB stack the library owns, does its work, and swaps back, so callers need no
 more than their usual.
 
-**One pool.** Everything HarfBuzz and the core allocate comes from
+**One pool.** Everything the core allocates comes from
 one Exec pool, with an eight-byte header per block for its size and a check
 word. Expunging the library deletes the pool, so nothing it allocated
 outlives it. The library has no C startup, no stdio and no constructors: libnix
@@ -136,7 +138,8 @@ checked against a cache, not when it opens.
 
 The reference gate includes:
 
-- glyph-for-glyph HarfBuzz comparison;
+- glyph-for-glyph HarfBuzz comparison (`compare_harfbuzz`): glyphs,
+  clusters, advances, offsets and unsafe-to-break flags exact on Latin text;
 - the reader and rasteriser against FreeType 2.14.3 unhinted
   (`compare_freetype`): cmap, names, flags, line metrics, advances and bitmap
   boxes exact, pixels within 64 of 255 and a mean within 2.5;
