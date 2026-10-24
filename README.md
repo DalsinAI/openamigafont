@@ -424,6 +424,20 @@ library then had HarfBuzz inside, whose maths went through libnix's libm
 stubs and their unopened math library bases (openamigafont #14). With the
 shaper our own, nothing in the library uses libm.
 
+## Amiga bitmap fonts
+
+[fonts/amiga](fonts/amiga) holds DejaVu Sans Mono as Amiga bitmap fonts for
+the Shell: `DejaVuSansMono.font` with sizes 12, 14, 16, 18 and 20 pixels
+high, fixed width, the Latin-1 characters, one bit a pixel. OpenUp installs
+them in `FONTS:` and makes them the Shell's font (the system default text)
+where there are no Font prefs yet.
+[tools/amigafont.py](tools/amigafont.py) makes them from the TrueType font,
+in the AmigaOS diskfont format, and checks them (`amigafont_check` in the
+host tests). It draws the glyphs with FreeType's monochrome hinting through
+Pillow, on the host, once: nothing of FreeType's is in the fonts or in
+OpenFont. [fonts/amiga/README.md](fonts/amiga/README.md) has the sizes, the
+previews and how they were made.
+
 ## Compatibility
 
 FreeType/HarfBuzz compatibility headers will be provided for the subset needed
@@ -436,4 +450,7 @@ are under the Unicode License v3
 ([LICENSES/Unicode-License-v3.txt](LICENSES/Unicode-License-v3.txt)); the
 build copies that licence to `build/amiga/licences`, and it goes wherever the
 library is copied. FreeType and HarfBuzz are no longer in OpenFont; the
-reference tests build against separate trees of theirs.
+reference tests build against separate trees of theirs. The fonts in
+`fonts/amiga` are DejaVu Sans Mono's, under the Bitstream Vera licence with
+DejaVu's changes in the public domain
+([fonts/amiga/LICENSE-DejaVu.txt](fonts/amiga/LICENSE-DejaVu.txt)).
