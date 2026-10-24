@@ -91,6 +91,14 @@ if(OPENFONT_TEST_FONT)
     add_test(NAME openfont_reader_fonts COMMAND test_reader ${OPENFONT_TEST_FONT} ${OPENFONT_TEST_OTF} ${OPENFONT_TEST_TTC})
 endif()
 
+# The Amiga bitmap fonts in fonts/amiga, read back: every field tools/amigafont.py
+# writes, checked (Python 3 alone; making them needs Pillow, checking doesn't).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME amigafont_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/amigafont.py
+             check ${CMAKE_CURRENT_SOURCE_DIR}/fonts/amiga/DejaVuSansMono.font)
+endif()
+
 # The reference gate: OpenFont's reader and rasteriser against FreeType
 # (unhinted), given a FreeType build (its source folder, with the library
 # built in build/). Only for testing; nothing of FreeType's is in OpenFont.
