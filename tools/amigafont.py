@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Amiga bitmap fonts from a fixed-width TrueType font.
 
-    tools/amigafont.py build TTF NAME OUTDIR [--sizes 12 14 16 18 20]
-                       [--render mono|threshold:N] [--preview DIR]
+    tools/amigafont.py build TTF NAME OUTDIR [--sizes 8 9 10 11 12 13 14 16 18 20 22 24]
+                       [--render mono|threshold:N] [--accents squeeze|fit] [--preview DIR]
     tools/amigafont.py check FONTDIR/NAME.font
     tools/amigafont.py preview FONTDIR/NAME.font SIZE OUT.png [--scale N]
+    tools/amigafont.py c FONTDIR/NAME.font SIZE OUT.h [--prefix NAME]
 
 build writes OUTDIR/NAME.font (the contents file) and OUTDIR/NAME/<size>, one
 file a size, in the AmigaOS diskfont format, for the Latin-1 characters 32 to
@@ -21,10 +22,16 @@ file a size, in the AmigaOS diskfont format, for the Latin-1 characters 32 to
   is tf_XSize wide, as console.device wants. HUNK_RELOC32 relocates the
   four pointers (the two node names, tf_CharData and tf_CharLoc).
 
-The height is the font's tf_YSize: the whole line, with room for the accents
-of the capitals (A grave) above and the descenders (_ and |) below. For each
-height the largest pixel size whose Latin-1 glyphs all fit is taken, and
-tf_XSize is the font's advance at that size.
+The height is the font's tf_YSize: the whole line, with room for the
+descenders (_ and |) below. For each height the largest pixel size whose
+Latin-1 glyphs fit is taken. With --accents squeeze (the default) the
+accented capitals (A grave to Y acute), the tallest glyphs, don't count: where
+an accent then rises above the line, the blank rows between it and its letter
+go first, then rows of the accent that repeat the row under them, then its
+top rows; the letter itself never moves. That gives 11 pixels 6 x 11 cells
+(10 pixels an em) where fitting every accent as drawn (--accents fit) gives
+5 x 11 (8 an em). tf_XSize is the font's advance at that size, or the widest
+glyph where one is wider (M and W at 7 pixels an em, the 8).
 
 The glyphs are drawn by FreeType through Pillow (the only thing this needs:
 Debian/Ubuntu python3-pil, or pip install pillow), one bit a pixel:
@@ -36,14 +43,17 @@ Debian/Ubuntu python3-pil, or pip install pillow), one bit a pixel:
 - threshold:N: the anti-aliased glyph, hinted, with a pixel set where its
   coverage is N (0-255) or more.
 
-A glyph wider than the cell is moved into it, or cut at its right edge when it
-is wider than the cell; build says which. Characters the font hasn't got
+A glyph that sticks out of the cell on one side is moved into it; build says
+which, and which accents it brought down. Characters the font hasn't got
 (127 to 159, the C1 controls) take the font's default glyph, the last in
 tf_CharLoc: a box the height of the capitals.
 
 check reads a contents file and its size files back, checks every field this
 writes, and prints them. preview draws text with a size file's own glyphs, as
-graphics.library's Text() would, into a PNG.
+graphics.library's Text() would, into a PNG. c writes one size as a C header
+of constant data (the TextFont's fields as macros, tf_CharData and
+tf_CharLoc as arrays), for a ROM that carries the font as graphics.library
+carries topaz.
 
 MIT, Copyright (c) 2026 AmigaChrome Team. The fonts it makes keep their
 font's licence (DejaVu: fonts/amiga/LICENSE-DejaVu.txt).
@@ -160,19 +170,61 @@ def advance(font) -> int:
     return int(a)
 
 
-def fit_size(ttf_path: str, height: int, chars, render: str):
-    """The largest pixel size at which every character's glyph fits a line
-    `height` pixels high: (ppem, font, glyphs, rows above, rows below)."""
+# The accented capitals (A grave to Y acute, not the multiplication sign): the tallest glyphs of Latin-1. With
+# --accents squeeze they don't set the pixel size; an accent that then sticks out above the line is brought
+# down into it (squeeze_accent).
+CAPITAL_ACCENTED = set(range(0xC0, 0xDE)) - {0xD7}
+
+
+def fit_size(ttf_path: str, height: int, chars, render: str, accents: str = "squeeze"):
+    """The largest pixel size at which the glyphs fit a line `height` pixels
+    high (every glyph, or with accents "squeeze" every glyph but the accented
+    capitals): (ppem, font, glyphs, rows above, rows below)."""
     from PIL import ImageFont
     for ppem in range(height, 3, -1):
         font = ImageFont.truetype(ttf_path, ppem, layout_engine=ImageFont.Layout.BASIC)
         glyphs = {c: draw_glyph(font, chr(c), ppem, render) for c in chars}
-        drawn = [g for g in glyphs.values() if g.rows]
+        drawn = [g for c, g in glyphs.items() if g.rows and (accents == "fit" or c not in CAPITAL_ACCENTED)]
         above = max(-g.top for g in drawn)
         below = max(g.bottom for g in drawn)
         if above + below <= height:
             return ppem, font, glyphs, above, below
     raise SystemExit(f"no pixel size fits {height} pixels")
+
+
+def cell_width(font, glyphs) -> int:
+    """tf_XSize: the font's advance, or the widest glyph when one is wider
+    (DejaVu Sans Mono's M and W at 7 pixels an em are 5 pixels on an advance
+    of 4), so no stroke is cut."""
+    return max(advance(font), max(g.width for g in glyphs.values()))
+
+
+def squeeze_accent(g: Glyph, room: int, cap: int) -> Glyph:
+    """An accented capital whose accent rises more than `room` rows above the
+    baseline, brought down: first the blank rows between the accent and the
+    letter go (the lowest first), then rows of the accent that repeat the row
+    under them (a ring's or an acute's sides: the shape stays), then, if it
+    is still too tall, the accent's top rows. Nothing at or below the
+    capitals' height (`cap` rows) moves."""
+    over = -g.top - room
+    if over <= 0:
+        return g
+    rows = [list(r) for r in g.rows]
+    body = -g.top - cap                     # rows from here down are the letter (at or under the cap height)
+    for y in range(min(body, len(rows)) - 1, -1, -1):
+        if over and not any(rows[y]):
+            del rows[y]
+            body -= 1
+            over -= 1
+    for y in range(min(body, len(rows)) - 2, -1, -1):
+        if over and rows[y] == rows[y + 1]:
+            del rows[y]
+            body -= 1
+            over -= 1
+    while over > 0 and rows:
+        del rows[0]
+        over -= 1
+    return Glyph(rows, g.left, -room if rows else 0)
 
 
 # ---- the Amiga files -----------------------------------------------------------------------------
@@ -437,7 +489,8 @@ def preview(path: Path, size: int, out: Path, scale: int) -> int:
 
 # ---- build -------------------------------------------------------------------------------------
 
-def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path | None) -> int:
+def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path | None,
+          accents: str = "squeeze") -> int:
     data = ttf.read_bytes()
     have = cmap_latin1(data)
     chars = [c for c in range(LO, HI + 1) if c in have]
@@ -445,12 +498,17 @@ def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path
     (outdir / name).mkdir(parents=True, exist_ok=True)
     report = []
     for height in sizes:
-        ppem, font, glyphs, above, below = fit_size(str(ttf), height, chars, render)
-        xsize = advance(font)
+        ppem, font, glyphs, above, below = fit_size(str(ttf), height, chars, render, accents)
+        xsize = cell_width(font, glyphs)
         spare = height - above - below
         top = above + (spare + 1) // 2             # a spare row goes above the capitals' accents first
         baseline = top - 1                          # tf_Baseline: the row the letters stand on
-        moved, cut = [], []
+        moved, cut, squeezed = [], [], []
+        cap = -glyphs[ord("H")].top
+        for c in sorted(CAPITAL_ACCENTED & set(glyphs)):
+            if -glyphs[c].top > top:
+                glyphs[c] = squeeze_accent(glyphs[c], top, cap)
+                squeezed.append(chr(c))
 
         def cell(g: Glyph, c: int):
             rows = [[0] * xsize for _ in range(height)]
@@ -471,7 +529,6 @@ def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path
 
         cells = [cell(glyphs[c], c) if c in glyphs else None for c in range(LO, HI + 1)]
         # the default glyph: a box from the capitals' height to the baseline
-        cap = -glyphs[ord("H")].top
         box = [[0] * xsize for _ in range(height)]
         y0, y1 = top - cap, top - 1
         for y in range(y0, y1 + 1):
@@ -484,7 +541,8 @@ def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path
         report.append((height, ppem, xsize, baseline, len(f), moved, cut))
         print(f"{name}/{height}: {xsize} x {height} from {ppem} pixels an em, baseline {baseline}, {len(f)} bytes"
               + (f"; moved into the cell: {''.join(moved)}" if moved else "")
-              + (f"; cut to the cell: {''.join(cut)}" if cut else ""))
+              + (f"; cut to the cell: {''.join(cut)}" if cut else "")
+              + (f"; accents brought down: {''.join(squeezed)}" if squeezed else ""))
     (outdir / f"{name}.font").write_bytes(contents_file(name, sizes))
     print(f"{name}.font: {len(sizes)} sizes; the default glyph for {len(missing)} characters the font hasn't got "
           f"({', '.join(str(c) for c in missing[:3])}{'...' if len(missing) > 3 else ''})")
@@ -498,6 +556,50 @@ def build(ttf: Path, name: str, outdir: Path, sizes, render: str, previews: Path
     return check(outdir / f"{name}.font")
 
 
+def c_header(path: Path, size: int, prefix: str, out: Path) -> int:
+    """One size as a C header of constant data, for a ROM that carries the
+    font as graphics.library carries topaz: the TextFont's fields as macros,
+    tf_CharData and tf_CharLoc as arrays."""
+    import hashlib
+    entries = {y: f for f, y, _, _ in read_contents(path)}
+    if size not in entries:
+        raise SystemExit(f"{path} has no size {size}")
+    src = path.parent / entries[size]
+    raw = src.read_bytes()
+    a = AmigaFont(raw, str(src))
+    P = prefix.upper()
+    lines = [
+        f"/* {path.name} {size} as constant data, made by openamigafont's tools/amigafont.py:",
+        f" *   amigafont.py c fonts/amiga/{path.name} {size} OUT --prefix {prefix}",
+        f" * from fonts/amiga/{entries[size]} (sha256 {hashlib.sha256(raw).hexdigest()}).",
+        f" * The font is DejaVu Sans Mono, Font Software under the Bitstream Vera licence with",
+        f" * DejaVu's changes in the public domain: its notice goes with every copy",
+        f" * (openamigafont's fonts/amiga/LICENSE-DejaVu.txt). */",
+        f"#define {P}_NAME \"{a.name}\"",
+        f"#define {P}_YSIZE {a.ysize}",
+        f"#define {P}_XSIZE {a.xsize}",
+        f"#define {P}_BASELINE {a.baseline}",
+        f"#define {P}_BOLDSMEAR {a.boldsmear}",
+        f"#define {P}_LOCHAR {a.lo}",
+        f"#define {P}_HICHAR {a.hi}",
+        f"#define {P}_MODULO {a.modulo}",
+        f"/* tf_CharData: {a.ysize} rows of {a.modulo} bytes */",
+        f"static const unsigned char {prefix}_data[{len(a.plane)}] = {{",
+    ]
+    for i in range(0, len(a.plane), 16):
+        lines.append("    " + ", ".join(f"0x{b:02x}" for b in a.plane[i:i + 16]) + ",")
+    lines += ["};", f"/* tf_CharLoc: for each character {a.lo} to {a.hi} and the default glyph, its first bit"
+                    " (high word) and width (low word) */",
+              f"static const unsigned long {prefix}_loc[{a.nglyph}] = {{"]
+    locs = [(o << 16) | w for o, w in a.locs]
+    for i in range(0, len(locs), 8):
+        lines.append("    " + ", ".join(f"0x{v:08x}" for v in locs[i:i + 8]) + ",")
+    lines.append("};")
+    out.write_text("\n".join(lines) + "\n", encoding="ascii")
+    print(f"{out}: {len(a.plane)} bytes of glyphs, {4 * a.nglyph} of locations")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -505,9 +607,17 @@ def main() -> int:
     b.add_argument("ttf", type=Path)
     b.add_argument("name")
     b.add_argument("outdir", type=Path)
-    b.add_argument("--sizes", type=int, nargs="+", default=[12, 14, 16, 18, 20])
+    b.add_argument("--sizes", type=int, nargs="+", default=[8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24])
     b.add_argument("--render", default="mono", help="mono (the font's hinting, one bit) or threshold:N (0-255)")
+    b.add_argument("--accents", default="squeeze", choices=["squeeze", "fit"],
+                   help="squeeze (the default): the accented capitals don't set the pixel size, their accents "
+                        "are brought down into the line; fit: every glyph fits as drawn")
     b.add_argument("--preview", type=Path, help="also a PNG a size in this folder")
+    h = sub.add_parser("c", help="one size as a C header of constant data (for a ROM)")
+    h.add_argument("font", type=Path)
+    h.add_argument("size", type=int)
+    h.add_argument("out", type=Path)
+    h.add_argument("--prefix", default="romfont")
     c = sub.add_parser("check", help="read a .font and its sizes back and check them")
     c.add_argument("font", type=Path)
     p = sub.add_parser("preview", help="text in a size's own glyphs, as a PNG")
@@ -519,9 +629,11 @@ def main() -> int:
     if a.cmd == "build":
         if a.render != "mono" and not a.render.startswith("threshold:"):
             ap.error("--render: mono or threshold:N")
-        return build(a.ttf, a.name, a.outdir, a.sizes, a.render, a.preview)
+        return build(a.ttf, a.name, a.outdir, a.sizes, a.render, a.preview, a.accents)
     if a.cmd == "check":
         return check(a.font)
+    if a.cmd == "c":
+        return c_header(a.font, a.size, a.prefix, a.out)
     return preview(a.font, a.size, a.out, a.scale)
 
 

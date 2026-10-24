@@ -427,13 +427,13 @@ shaper our own, nothing in the library uses libm.
 ## Amiga bitmap fonts
 
 [fonts/amiga](fonts/amiga) holds DejaVu Sans Mono as Amiga bitmap fonts for
-the Shell: `DejaVuSansMono.font` with sizes 12, 14, 16, 18 and 20 pixels
-high, fixed width, the Latin-1 characters, one bit a pixel. OpenUp installs
-them in `FONTS:` and makes them the Shell's font (the system default text)
-where there are no Font prefs yet.
+the Shell: `DejaVuSansMono.font` with sizes 8 to 14, 16, 18, 20, 22 and 24
+pixels high, fixed width, the Latin-1 characters, one bit a pixel. OpenUp
+installs them in `FONTS:`, and the open ROM carries the 11 as its system
+default text, the Shell's font where no Font prefs name another.
 [tools/amigafont.py](tools/amigafont.py) makes them from the TrueType font,
-in the AmigaOS diskfont format, and checks them (`amigafont_check` in the
-host tests). It draws the glyphs with FreeType's monochrome hinting through
+in the AmigaOS diskfont format, checks them (`amigafont_check` in the host
+tests), and writes a size as C data for a ROM. It draws the glyphs with FreeType's monochrome hinting through
 Pillow, on the host, once: nothing of FreeType's is in the fonts or in
 OpenFont. [fonts/amiga/README.md](fonts/amiga/README.md) has the sizes, the
 previews and how they were made.
