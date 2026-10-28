@@ -113,6 +113,13 @@ void of_font_close(OFFont *f);
 /* The glyph a codepoint maps to, 0 when none. */
 uint32_t of_font_glyph(const OFFont *f, uint32_t codepoint);
 
+/* The characters the font's cmap maps, as [first, last] pairs in r (at most
+ * cap of them), ascending. Returns how many pairs there are, which may be
+ * more than cap. A range may hold characters without a glyph (format 4's
+ * segments count whole); a Symbol font's U+F0xx stand-ins are not mapped
+ * back to U+00xx. */
+size_t of_font_cmap_ranges(const OFFont *f, uint32_t *r, size_t cap);
+
 /* A glyph's advance and left side bearing in font units. */
 void of_font_hmetrics(const OFFont *f, uint32_t glyph, uint32_t *advance, int32_t *lsb);
 

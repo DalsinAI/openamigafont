@@ -212,6 +212,11 @@ uint32_t of_face_char_index(OFFace *face, uint32_t codepoint)
     return face ? of_font_glyph(&face->font, codepoint) : 0;
 }
 
+size_t of_face_cmap_ranges(OFFace *face, uint32_t *ranges, size_t cap)
+{
+    return face ? of_font_cmap_ranges(&face->font, ranges, cap) : 0;
+}
+
 /* One walk at a time: the faces are not shared between threads (the
  * library takes its lock around every call). */
 static uint32_t walk_count;

@@ -130,6 +130,9 @@ int of_face_set_pixel_size(OFFace *face, uint32_t pixels);
 int of_face_info(OFFace *face, OFFaceInfo *info);
 /* The glyph a codepoint maps to in this face alone, 0 when it has none. */
 uint32_t of_face_char_index(OFFace *face, uint32_t codepoint);
+/* The characters the face's cmap maps, as [first, last] pairs (see
+ * of_font_cmap_ranges): how many there are, which may be more than cap. */
+size_t of_face_cmap_ranges(OFFace *face, uint32_t *ranges, size_t cap);
 
 /* Adds fallback to the end of face's chain, holding it. OF_ERR_RANGE when
  * the chain is full, OF_ERR_ARGUMENT for a face falling back to itself or

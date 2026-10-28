@@ -118,6 +118,44 @@ int main(int argc, char **argv)
     }
     of_face_close(face);
 
+    /* a face for a character: the same answer before and after the faces'
+     * coverage is known, and none for a character no face has */
+    {
+        static const uint32_t cps[] = { 0x2603, 'A', 0x10FFFD, 0x2603, 0x10FFFD, 0x0416, 'A' };
+        size_t k, known = 0;
+        for (k = 0; k < sizeof cps / sizeof cps[0]; ++k) {
+            int rc = 0;
+            OFFace *f = of_index_open_char(&ix, ctx, cps[k], 400, 0, &rc);
+            if (cps[k] == 0x10FFFD)
+                expect(!f && rc == OF_ERR_FONT, "no face has U+10FFFD");
+            else
+                expect(f && of_face_char_index(f, cps[k]) != 0, "a face has the character");
+            of_face_close(f);
+        }
+        for (k = 0; k < ix.coverage_count; ++k)
+            known += ix.coverage[k].known;
+        expect(known > 0, "coverage learnt");
+        printf("  coverage known for %lu of %lu faces\n", (unsigned long)known, (unsigned long)ix.count);
+        {
+            uint32_t r[4096];
+            OFFace *f = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);
+            size_t pairs = of_face_cmap_ranges(f, r, 2048), m, all = 1;
+            expect(f && pairs > 0 && pairs <= 2048, "DejaVu Sans's ranges");
+            /* every character with a glyph is in a range */
+            for (m = 0x20; f && m < 0x3000; ++m) {
+                size_t q;
+                int in = 0;
+                if (!of_face_char_index(f, (uint32_t)m))
+                    continue;
+                for (q = 0; q < pairs && !in; ++q)
+                    in = m >= r[2 * q] && m <= r[2 * q + 1];
+                all &= in;
+            }
+            expect(all, "the ranges hold every mapped character");
+            of_face_close(f);
+        }
+    }
+
     /* no loops in the fallback graph, however long */
     {
         OFFace *fa = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);

@@ -94,10 +94,22 @@ void of_index_init(OFIndex *ix)
     copy_str(ix->fallbacks, sizeof ix->fallbacks, default_fallbacks, strlen(default_fallbacks));
 }
 
+/* Forgets every entry's coverage: the entries changed. */
+static void drop_coverage(OFIndex *ix)
+{
+    size_t i;
+    for (i = 0; i < ix->coverage_count; ++i)
+        free(ix->coverage[i].ranges);
+    free(ix->coverage);
+    ix->coverage = NULL;
+    ix->coverage_count = 0;
+}
+
 void of_index_free(OFIndex *ix)
 {
     if (!ix)
         return;
+    drop_coverage(ix);
     free(ix->entries);
     ix->entries = NULL;
     ix->count = ix->cap = 0;
@@ -234,6 +246,7 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
     struct ScanArg a;
     if (!ix || !ctx)
         return OF_ERR_ARGUMENT;
+    drop_coverage(ix);
     ix->count = 0;
     a.ix = ix;
     a.ctx = ctx;
@@ -435,6 +448,7 @@ int of_index_load(OFIndex *ix, const char *path)
         return OF_ERR_CACHE;
     }
     p += 7;
+    drop_coverage(ix);
     ix->count = 0;
     while (p < end) {
         const char *line = p, *eol = p;
@@ -699,17 +713,68 @@ OFFace *of_index_open_family(const OFIndex *ix, OFContext *ctx, const char *fami
 }
 
 /* opens e and keeps it when it has a glyph for codepoint */
-static OFFace *open_if_has(OFContext *ctx, const OFIndexEntry *e, uint32_t codepoint)
+static int covered(const OFCoverage *c, uint32_t codepoint)
 {
-    OFFace *face = of_face_open_index(ctx, e->path, e->face_index);
-    if (face && !of_face_char_index(face, codepoint)) {
+    uint32_t lo = 0, hi = c->count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (codepoint < c->ranges[2 * mid])
+            hi = mid;
+        else if (codepoint > c->ranges[2 * mid + 1])
+            lo = mid + 1;
+        else
+            return 1;
+    }
+    return 0;
+}
+
+/* Keeps the characters face maps as entry i's coverage. */
+static void learn_coverage(OFIndex *ix, size_t i, OFFace *face)
+{
+    OFCoverage *c;
+    size_t n;
+    if (!ix->coverage) {
+        ix->coverage = (OFCoverage *)calloc(ix->count, sizeof *ix->coverage);
+        if (!ix->coverage)
+            return;
+        ix->coverage_count = ix->count;
+    }
+    if (i >= ix->coverage_count)
+        return;
+    c = &ix->coverage[i];
+    n = of_face_cmap_ranges(face, NULL, 0);
+    if (!n || n > 0xFFFF)
+        return;
+    c->ranges = (uint32_t *)malloc(n * 2 * sizeof(uint32_t));
+    if (!c->ranges)
+        return;
+    c->count = (uint32_t)of_face_cmap_ranges(face, c->ranges, n);
+    c->known = 1;
+}
+
+/* Entry e's face when it has the character. A face is opened (the whole
+ * file read) only the first time, or when its coverage says it may have
+ * it; characters below U+0100 always look, for Symbol fonts' stand-ins. */
+static OFFace *open_if_has(OFIndex *ix, OFContext *ctx, const OFIndexEntry *e, uint32_t codepoint)
+{
+    size_t i = (size_t)(e - ix->entries);
+    OFFace *face;
+    if (codepoint >= 0x100 && i < ix->coverage_count && ix->coverage[i].known
+        && !covered(&ix->coverage[i], codepoint))
+        return NULL;
+    face = of_face_open_index(ctx, e->path, e->face_index);
+    if (!face)
+        return NULL;
+    if (i >= ix->coverage_count || !ix->coverage[i].known)
+        learn_coverage(ix, i, face);
+    if (!of_face_char_index(face, codepoint)) {
         of_face_close(face);
         face = NULL;
     }
     return face;
 }
 
-OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint,
+OFFace *of_index_open_char(OFIndex *ix, OFContext *ctx, uint32_t codepoint,
                            uint16_t weight, int italic, int *error)
 {
     const char *p, *end;
@@ -741,7 +806,7 @@ OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint
         if (fe == f)
             continue;
         fb = best_of_family(ix, f, (size_t)(fe - f), weight, italic);
-        if (fb && (face = open_if_has(ctx, fb, codepoint)) != NULL)
+        if (fb && (face = open_if_has(ix, ctx, fb, codepoint)) != NULL)
             return face;
     }
     /* then every face: the right slant and the nearest weight first */
@@ -757,7 +822,7 @@ OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint
         if (seen)
             continue;
         best = best_of_family(ix, e->family, strlen(e->family), weight, italic);
-        if (best && (face = open_if_has(ctx, best, codepoint)) != NULL)
+        if (best && (face = open_if_has(ix, ctx, best, codepoint)) != NULL)
             return face;
     }
     *error = OF_ERR_FONT;
