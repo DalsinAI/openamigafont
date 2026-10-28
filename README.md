@@ -379,6 +379,20 @@ with `IoErr()` in `cb_Top`. The library grows by 4,976 bytes (252,368 to
 257,344). Check `lib_Revision` against
 `OPENFONT_REVISION_COLOR` (4) before calling them.
 
+`OF_FindFaceForCharA` remembers which characters each indexed font has (its
+character map's ranges, read the first time the font is opened), so a
+character no font has, or one only a late font has, no longer opens every
+font file again. On the PC, 200 characters no font has took 0.102 s across
+20 faces before and 0.002 s now. Characters below U+0100 are always checked
+in the font itself, for symbol fonts. The core's `of_face_cmap_ranges` gives
+the ranges. `OF_AddFontDir` after the index file was read reads the file
+again with the new folder, so a program's own folder is not read again
+at every start of the library. Faces opened from the same file share one
+copy of it while any of them is open, so a face found for a character in
+a font the page already uses reads nothing from disk (50 such lookups:
+51 file reads before, 1 now). The library grows by 1,552 bytes (257,344
+to 258,896).
+
 ### Building it
 
 [amiga/build-library.sh](amiga/build-library.sh) builds it with OpenAmigaGCC

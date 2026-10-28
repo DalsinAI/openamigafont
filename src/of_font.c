@@ -461,6 +461,78 @@ static uint32_t cmap_lookup(const OFFont *f, uint32_t c)
     }
 }
 
+/* Adds [first, last] to the pairs in r, merging it with the pair before
+ * when they touch (the cmap's ranges come in ascending order). */
+static size_t add_range(uint32_t *r, size_t n, size_t cap, uint32_t first, uint32_t last)
+{
+    if (n && n - 1 < cap && first <= r[2 * n - 1] + 1) {
+        if (last > r[2 * n - 1])
+            r[2 * n - 1] = last;
+        return n;
+    }
+    if (n < cap) {
+        r[2 * n] = first;
+        r[2 * n + 1] = last;
+    }
+    return n + 1;
+}
+
+size_t of_font_cmap_ranges(const OFFont *f, uint32_t *r, size_t cap)
+{
+    const uint8_t *d = f->data;
+    uint32_t s = f->cmap_sub;
+    size_t n = 0;
+    if (!s)
+        return 0;
+    switch (f->cmap_format) {
+    case 0:
+        return add_range(r, 0, cap, 0, 255);
+    case 6:
+        if (!in_file(f, s, 10) || !of_u16(d + s + 8))
+            return 0;
+        return add_range(r, 0, cap, of_u16(d + s + 6), of_u16(d + s + 6) + of_u16(d + s + 8) - 1u);
+    case 4: {
+        uint16_t segx2, segs, i;
+        uint32_t ends, starts;
+        if (!in_file(f, s, 14))
+            return 0;
+        segx2 = of_u16(d + s + 6);
+        segs = segx2 / 2;
+        ends = s + 14;
+        starts = ends + segx2 + 2;
+        if (!segs || !in_file(f, ends, 4u * segx2 + 2))
+            return 0;
+        /* a segment counts whole: one with holes in it costs only a look
+         * at the font itself */
+        for (i = 0; i < segs; ++i) {
+            uint16_t start = of_u16(d + starts + 2u * i), end = of_u16(d + ends + 2u * i);
+            if (start == 0xFFFF || start > end)
+                continue;
+            n = add_range(r, n, cap, start, end);
+        }
+        return n;
+    }
+    case 12:
+    case 13: {
+        uint32_t groups, i;
+        if (!in_file(f, s, 16))
+            return 0;
+        groups = of_u32(d + s + 12);
+        if (groups > (f->size - s - 16) / 12)
+            return 0;
+        for (i = 0; i < groups; ++i) {
+            const uint8_t *g = d + s + 16 + 12 * i;
+            uint32_t first = of_u32(g), last = of_u32(g + 4);
+            if (first <= last)
+                n = add_range(r, n, cap, first, last);
+        }
+        return n;
+    }
+    default:
+        return 0;
+    }
+}
+
 uint32_t of_font_glyph(const OFFont *f, uint32_t codepoint)
 {
     uint32_t g = cmap_lookup(f, codepoint);

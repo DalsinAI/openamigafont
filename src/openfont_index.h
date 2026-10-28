@@ -33,9 +33,20 @@ typedef struct OFIndexDir {
     int present;                    /* could be read when last scanned */
 } OFIndexDir;
 
+/* The characters an entry's face maps, worked out the first time a
+ * character lookup needs them, so later lookups open only faces that may
+ * have the character. Kept in memory only. */
+typedef struct OFCoverage {
+    uint32_t *ranges;               /* [first, last] pairs, ascending */
+    uint32_t count;
+    int known;
+} OFCoverage;
+
 typedef struct OFIndex {
     OFIndexEntry *entries;
     size_t count, cap;
+    OFCoverage *coverage;           /* one per entry, or NULL */
+    size_t coverage_count;
     OFIndexDir dirs[OF_INDEX_MAX_DIRS];
     size_t ndirs;
     char aliases[2048];             /* "name=family,family\n" lines, the user's own */
@@ -93,7 +104,7 @@ OFFace *of_index_open_family(const OFIndex *ix, OFContext *ctx, const char *fami
 /* Opens a face that has a glyph for codepoint: the default fallback
  * chain's families first, then every family's best face for weight and
  * slant, in the index's order. NULL (*error OF_ERR_FONT) when none has it. */
-OFFace *of_index_open_char(const OFIndex *ix, OFContext *ctx, uint32_t codepoint,
+OFFace *of_index_open_char(OFIndex *ix, OFContext *ctx, uint32_t codepoint,
                            uint16_t weight, int italic, int *error);
 
 #endif

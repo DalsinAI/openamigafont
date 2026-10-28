@@ -118,6 +118,44 @@ int main(int argc, char **argv)
     }
     of_face_close(face);
 
+    /* a face for a character: the same answer before and after the faces'
+     * coverage is known, and none for a character no face has */
+    {
+        static const uint32_t cps[] = { 0x2603, 'A', 0x10FFFD, 0x2603, 0x10FFFD, 0x0416, 'A' };
+        size_t k, known = 0;
+        for (k = 0; k < sizeof cps / sizeof cps[0]; ++k) {
+            int rc = 0;
+            OFFace *f = of_index_open_char(&ix, ctx, cps[k], 400, 0, &rc);
+            if (cps[k] == 0x10FFFD)
+                expect(!f && rc == OF_ERR_FONT, "no face has U+10FFFD");
+            else
+                expect(f && of_face_char_index(f, cps[k]) != 0, "a face has the character");
+            of_face_close(f);
+        }
+        for (k = 0; k < ix.coverage_count; ++k)
+            known += ix.coverage[k].known;
+        expect(known > 0, "coverage learnt");
+        printf("  coverage known for %lu of %lu faces\n", (unsigned long)known, (unsigned long)ix.count);
+        {
+            uint32_t r[4096];
+            OFFace *f = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);
+            size_t pairs = of_face_cmap_ranges(f, r, 2048), m, all = 1;
+            expect(f && pairs > 0 && pairs <= 2048, "DejaVu Sans's ranges");
+            /* every character with a glyph is in a range */
+            for (m = 0x20; f && m < 0x3000; ++m) {
+                size_t q;
+                int in = 0;
+                if (!of_face_char_index(f, (uint32_t)m))
+                    continue;
+                for (q = 0; q < pairs && !in; ++q)
+                    in = m >= r[2 * q] && m <= r[2 * q + 1];
+                all &= in;
+            }
+            expect(all, "the ranges hold every mapped character");
+            of_face_close(f);
+        }
+    }
+
     /* no loops in the fallback graph, however long */
     {
         OFFace *fa = of_index_open(&ix, ctx, "DejaVu Sans", 400, 0, 0, NULL);
@@ -135,6 +173,22 @@ int main(int argc, char **argv)
         of_face_close(fa);
         of_face_close(fb);
         of_face_close(fc);
+    }
+
+    /* a folder added after the file was read: read again with it, the
+     * folder's fonts come back and nothing is stale (the library's
+     * OF_AddFontDir after its first lookup) */
+    if (argc > 3) {
+        OFIndex ix5;
+        of_index_init(&ix5);
+        for (i = 2; i < (size_t)argc - 1; ++i)
+            of_index_add_dir(&ix5, argv[i]);
+        expect(of_index_load(&ix5, argv[1]) == OF_OK && ix5.count < ix.count, "fewer fonts without the last folder");
+        of_index_add_dir(&ix5, argv[argc - 1]);
+        expect(of_index_stale(&ix5), "the added folder is stale");
+        expect(of_index_load(&ix5, argv[1]) == OF_OK && ix5.count == ix.count, "all of them when read again");
+        expect(!of_index_stale(&ix5), "and nothing to read");
+        of_index_free(&ix5);
     }
 
     /* a folder that is there but can't be listed stays stale */
@@ -196,6 +250,26 @@ int main(int argc, char **argv)
         of_face_close(a16);
         of_face_close(b32);
         of_face_close(shared);
+    }
+
+    /* two faces of one file share it: the second still draws once the
+     * first is closed */
+    {
+        char file[1024];
+        OFFace *a, *b;
+        OFBitmap bm;
+        snprintf(file, sizeof file, "%s/DejaVuSans.ttf", argv[2]);
+        a = of_face_open_file(ctx, file, 0, NULL);
+        b = of_face_open_file(ctx, file, 0, NULL);
+        expect(a && b && a != b, "two faces of one file");
+        of_face_close(a);
+        expect(b && of_raster_glyph_a8(b, of_face_char_index(b, 'g'), &bm) == OF_OK && bm.width > 0,
+               "the second draws after the first is closed");
+        of_bitmap_release(&bm);
+        of_face_close(b);
+        a = of_face_open_file(ctx, file, 0, NULL);
+        expect(a != NULL, "and the file opens again after both");
+        of_face_close(a);
     }
 
     /* why a face did not open */

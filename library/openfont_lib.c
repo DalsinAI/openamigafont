@@ -128,6 +128,8 @@ struct OpenFontBase {
     OFContext *ctx;                 /* the core's context, made on first use */
     OFIndex index;
     int index_ready;                /* folders and settings read, index loaded */
+    int checked;                    /* the folders were checked at check_time */
+    ULONG check_time;               /* in ticks */
     struct OFTextFonts fonts;       /* the Amiga fonts OF_OpenTextFont loaded */
     int datatypes_tried;            /* OF_GlyphColorBitmap opened datatypes.library, or failed to */
 };
@@ -215,7 +217,9 @@ static void ensure_index_dir(void)
         UnLock(l);
 }
 
-static int setup_index(struct OpenFontBase *b)
+/* extra: a folder of the first OF_AddFontDir, on the list before the
+ * index file is read, so the file is read once */
+static int setup_index(struct OpenFontBase *b, const char *extra)
 {
     char *dirs, *aliases, *fallbacks;
     OFIndex *ix = &b->index;
@@ -225,6 +229,8 @@ static int setup_index(struct OpenFontBase *b)
     of_index_init(ix);
     of_index_add_dir(ix, "FONTS:");
     of_index_add_dir(ix, "LIBS:WebBrowser/Fonts");
+    if (extra)
+        of_index_add_dir(ix, extra);
     if ((dirs = read_text(DIRS_FILE)) != NULL) {
         char *p = dirs;
         while (*p) {
@@ -250,7 +256,15 @@ static int setup_index(struct OpenFontBase *b)
     if (of_index_load(ix, INDEX_FILE) != OF_OK)
         ix->count = 0;
     b->index_ready = 1;
+    b->checked = 0;
     return OF_OK;
+}
+
+static ULONG ticks_now(void)
+{
+    struct DateStamp ds;
+    DateStamp(&ds);
+    return ((ULONG)ds.ds_Days * 1440 + (ULONG)ds.ds_Minute) * TICKS_PER_SECOND * 60 + (ULONG)ds.ds_Tick;
 }
 
 static int refresh_index(struct OpenFontBase *b, int force)
@@ -259,9 +273,18 @@ static int refresh_index(struct OpenFontBase *b, int force)
     int rc;
     if (!ctx)
         return OF_ERR_MEMORY;
-    setup_index(b);
-    if (!force && !of_index_stale(&b->index))
-        return OF_OK;
+    setup_index(b, NULL);
+    /* the folders' dates once every two seconds, not at every lookup: a
+     * page asks for a face many times in a moment */
+    if (!force) {
+        ULONG now = ticks_now();
+        if (b->checked && now - b->check_time < 2 * TICKS_PER_SECOND)
+            return OF_OK;
+        b->checked = 1;
+        b->check_time = now;
+        if (!of_index_stale(&b->index))
+            return OF_OK;
+    }
     rc = of_index_scan(&b->index, ctx);
     if (rc == OF_OK) {
         ensure_index_dir();
@@ -439,8 +462,22 @@ static long w_char_index(void *base, void *arg)
 static long w_add_dir(void *base, void *arg)
 {
     struct OpenFontBase *b = (struct OpenFontBase *)base;
-    setup_index(b);
-    return of_index_add_dir(&b->index, ((struct OpenArgs *)arg)->path);
+    const char *path = ((struct OpenArgs *)arg)->path;
+    size_t before;
+    long rc;
+    if (!b->index_ready)
+        return setup_index(b, path);
+    before = b->index.ndirs;
+    rc = of_index_add_dir(&b->index, path);
+    /* The index file was read before this folder was on the list, so its
+     * fonts were left out: read it again with the folder, or every new
+     * start of the library would read all the fonts again. Without a file
+     * the folder is stale and the next lookup reads it. */
+    if (rc == OF_OK && b->index.ndirs > before) {
+        of_index_load(&b->index, INDEX_FILE);
+        b->checked = 0;
+    }
+    return rc;
 }
 
 static long w_rescan(void *base, void *arg)
