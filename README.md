@@ -385,7 +385,10 @@ character no font has, or one only a late font has, no longer opens every
 font file again. On the PC, 200 characters no font has took 0.102 s across
 20 faces before and 0.002 s now. Characters below U+0100 are always checked
 in the font itself, for symbol fonts. The core's `of_face_cmap_ranges` gives
-the ranges. The library grows by 1,252 bytes (257,344 to 258,596).
+the ranges. `OF_AddFontDir` after the index file was read reads the file
+again with the new folder, so a program's own folder is not read again
+at every start of the library. The library grows by 1,356 bytes (257,344
+to 258,700).
 
 ### Building it
 

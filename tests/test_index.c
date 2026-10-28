@@ -175,6 +175,22 @@ int main(int argc, char **argv)
         of_face_close(fc);
     }
 
+    /* a folder added after the file was read: read again with it, the
+     * folder's fonts come back and nothing is stale (the library's
+     * OF_AddFontDir after its first lookup) */
+    if (argc > 3) {
+        OFIndex ix5;
+        of_index_init(&ix5);
+        for (i = 2; i < (size_t)argc - 1; ++i)
+            of_index_add_dir(&ix5, argv[i]);
+        expect(of_index_load(&ix5, argv[1]) == OF_OK && ix5.count < ix.count, "fewer fonts without the last folder");
+        of_index_add_dir(&ix5, argv[argc - 1]);
+        expect(of_index_stale(&ix5), "the added folder is stale");
+        expect(of_index_load(&ix5, argv[1]) == OF_OK && ix5.count == ix.count, "all of them when read again");
+        expect(!of_index_stale(&ix5), "and nothing to read");
+        of_index_free(&ix5);
+    }
+
     /* a folder that is there but can't be listed stays stale */
     {
         OFIndex ix3;

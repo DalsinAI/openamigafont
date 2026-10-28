@@ -439,8 +439,18 @@ static long w_char_index(void *base, void *arg)
 static long w_add_dir(void *base, void *arg)
 {
     struct OpenFontBase *b = (struct OpenFontBase *)base;
+    size_t before;
+    long rc;
     setup_index(b);
-    return of_index_add_dir(&b->index, ((struct OpenArgs *)arg)->path);
+    before = b->index.ndirs;
+    rc = of_index_add_dir(&b->index, ((struct OpenArgs *)arg)->path);
+    /* The index file was read before this folder was on the list, so its
+     * fonts were left out: read it again with the folder, or every new
+     * start of the library would read all the fonts again. Without a file
+     * the folder is stale and the next lookup reads it. */
+    if (rc == OF_OK && b->index.ndirs > before)
+        of_index_load(&b->index, INDEX_FILE);
+    return rc;
 }
 
 static long w_rescan(void *base, void *arg)
