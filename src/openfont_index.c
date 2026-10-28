@@ -295,13 +295,15 @@ int of_index_scan(OFIndex *ix, OFContext *ctx)
 }
 
 /* ---- the file: a few lines of text ----
- *   OFIX 2
+ *   OFIX 3
  *   D <stamp0> <stamp1> <stamp2> <present>	<folder>
  *   F <face> <weight> <width> <flags> <range0..3>	<family>	<style>	<path>
+ *   R <blocks0..31>         the F line's face's characters, a bit a block
  *   E <how many F lines>
  * Numbers in hex. Tabs never occur in names; a name with one is cut there.
  * A file without its E line, or with the wrong count, was cut short and is
- * refused (version 1 had no E line). */
+ * refused (version 1 had no E line). Version 2 had no R lines, and is read
+ * again from the folders. */
 
 struct Out {
     uint8_t *p;
@@ -358,7 +360,7 @@ int of_index_save(const OFIndex *ix, const char *path)
     if (!ix || !path)
         return OF_ERR_ARGUMENT;
     memset(&o, 0, sizeof o);
-    put(&o, "OFIX 2\n", 7);
+    put(&o, "OFIX 3\n", 7);
     for (i = 0; i < ix->ndirs; ++i) {
         put(&o, "D ", 2);
         for (k = 0; k < 3; ++k)
@@ -462,7 +464,7 @@ int of_index_load(OFIndex *ix, const char *path)
         return rc;
     p = (const char *)data;
     end = p + size;
-    if (size < 7 || memcmp(p, "OFIX 2\n", 7)) {
+    if (size < 7 || memcmp(p, "OFIX 3\n", 7)) {
         free(data);
         return OF_ERR_CACHE;
     }
