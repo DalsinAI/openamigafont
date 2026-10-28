@@ -76,23 +76,6 @@ int main(int argc, char **argv)
             break;
     expect(i == ix.count, "entries round-trip");
 
-    /* the faces' characters by blocks come with the file: a character in a
-     * block no face has opens no face at all */
-    {
-        size_t k, blocks = 0, known = 0;
-        int rc = 0;
-        for (k = 0; k < ix2.coverage_count; ++k)
-            blocks += ix2.coverage[k].has_blocks;
-        expect(ix2.coverage_count == ix2.count && blocks == ix2.count, "every face's blocks from the file");
-        expect(!of_index_open_char(&ix2, ctx, 0x2FFFD, 400, 0, &rc) && rc == OF_ERR_FONT, "no face has U+2FFFD");
-        for (k = 0; k < ix2.coverage_count; ++k)
-            known += ix2.coverage[k].known;
-        expect(known == 0, "and no face was opened for it");
-        face = of_index_open_char(&ix2, ctx, 0x2603, 400, 0, &rc);
-        expect(face && of_face_char_index(face, 0x2603), "the snowman from the file's index");
-        of_face_close(face);
-    }
-
     face = of_index_open(&ix, ctx, "Liberation Sans", 400, 0, 1, NULL);
     expect(face != NULL, "open with fallbacks");
     expect(of_face_fallback_count(face) >= 1, "a fallback chain");

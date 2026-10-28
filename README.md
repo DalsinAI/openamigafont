@@ -387,12 +387,8 @@ font file again. On the PC, 200 characters no font has took 0.102 s across
 in the font itself, for symbol fonts. The core's `of_face_cmap_ranges` gives
 the ranges. `OF_AddFontDir` after the index file was read reads the file
 again with the new folder, so a program's own folder is not read again
-at every start of the library. The index file (`FontIndex`) also keeps
-each face's characters by blocks of 256 below U+40000, about 290 bytes a
-face, so after a new start a character in a block that a face has none of
-opens no font file at all. The file is now version 3 (`OFIX 3`): a version 2 file is
-read again from the folders once. The library grows by 2,860 bytes (257,344 to
-260,204).
+at every start of the library. The library grows by 1,356 bytes (257,344
+to 258,700).
 
 ### Building it
 
