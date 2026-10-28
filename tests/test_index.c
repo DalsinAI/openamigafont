@@ -252,6 +252,26 @@ int main(int argc, char **argv)
         of_face_close(shared);
     }
 
+    /* two faces of one file share it: the second still draws once the
+     * first is closed */
+    {
+        char file[1024];
+        OFFace *a, *b;
+        OFBitmap bm;
+        snprintf(file, sizeof file, "%s/DejaVuSans.ttf", argv[2]);
+        a = of_face_open_file(ctx, file, 0, NULL);
+        b = of_face_open_file(ctx, file, 0, NULL);
+        expect(a && b && a != b, "two faces of one file");
+        of_face_close(a);
+        expect(b && of_raster_glyph_a8(b, of_face_char_index(b, 'g'), &bm) == OF_OK && bm.width > 0,
+               "the second draws after the first is closed");
+        of_bitmap_release(&bm);
+        of_face_close(b);
+        a = of_face_open_file(ctx, file, 0, NULL);
+        expect(a != NULL, "and the file opens again after both");
+        of_face_close(a);
+    }
+
     /* why a face did not open */
     {
         int err = 0;

@@ -387,8 +387,11 @@ font file again. On the PC, 200 characters no font has took 0.102 s across
 in the font itself, for symbol fonts. The core's `of_face_cmap_ranges` gives
 the ranges. `OF_AddFontDir` after the index file was read reads the file
 again with the new folder, so a program's own folder is not read again
-at every start of the library. The library grows by 1,356 bytes (257,344
-to 258,700).
+at every start of the library. Faces opened from the same file share one
+copy of it while any of them is open, so a face found for a character in
+a font the page already uses reads nothing from disk (50 such lookups:
+51 file reads before, 1 now). The library grows by 1,552 bytes (257,344
+to 258,896).
 
 ### Building it
 

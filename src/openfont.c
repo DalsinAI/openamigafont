@@ -13,8 +13,20 @@
  * and rasteriser (of_font.c, of_cff.c, of_raster.c) and the shaper
  * (of_shape.c, of_layout.c). */
 
+/* A font file read into memory, shared by every face of the context
+ * opened from it while one is open: a face found for a character is most
+ * often of a file already open (the page's own font), and reading a whole
+ * file again from a slow disk is most of what finding it costs. */
+typedef struct OFFile {
+    struct OFFile *next;
+    uint8_t *data;
+    size_t size;
+    uint32_t users;
+    char path[1];
+} OFFile;
+
 struct OFContext {
-    int unused;                     /* nothing shared yet; kept for the API */
+    OFFile *files;
 };
 
 struct OFFace {
@@ -27,6 +39,7 @@ struct OFFace {
     size_t data_size;
     uint32_t face_index;
     int owns_data;
+    OFFile *file;                   /* the shared file its data is, or NULL */
     int have_fingerprint;           /* worked out the first time a cache asks */
     uint64_t source_fingerprint;
     uint32_t nfallbacks;
@@ -58,7 +71,53 @@ void of_context_destroy(OFContext *ctx)
 {
     if (!ctx)
         return;
+    while (ctx->files) {
+        OFFile *f = ctx->files;
+        ctx->files = f->next;
+        free(f->data);
+        free(f);
+    }
     free(ctx);
+}
+
+static void release_file(OFContext *ctx, OFFile *f)
+{
+    OFFile **p;
+    if (--f->users)
+        return;
+    for (p = &ctx->files; *p; p = &(*p)->next)
+        if (*p == f) {
+            *p = f->next;
+            break;
+        }
+    free(f->data);
+    free(f);
+}
+
+/* The file at path, read once while any face of it is open. */
+static OFFile *use_file(OFContext *ctx, const char *path, int *error)
+{
+    OFFile *f;
+    size_t n = strlen(path);
+    for (f = ctx->files; f; f = f->next)
+        if (!strcmp(f->path, path)) {
+            f->users++;
+            return f;
+        }
+    f = (OFFile *)malloc(sizeof(*f) + n);
+    if (!f) {
+        *error = OF_ERR_MEMORY;
+        return NULL;
+    }
+    if ((*error = of_io_read_all(path, &f->data, &f->size)) != OF_OK) {
+        free(f);
+        return NULL;
+    }
+    memcpy(f->path, path, n + 1);
+    f->users = 1;
+    f->next = ctx->files;
+    ctx->files = f;
+    return f;
 }
 
 static OFFace *open_memory(OFContext *ctx, uint8_t *data, size_t size,
@@ -111,14 +170,18 @@ OFFace *of_face_open_memory(OFContext *ctx, uint8_t *data, size_t size,
 
 OFFace *of_face_open_file(OFContext *ctx, const char *path, uint32_t face_index, int *error)
 {
-    uint8_t *data = NULL;
-    size_t size = 0;
+    OFFile *f = NULL;
     int e;
     OFFace *face = NULL;
     if (!ctx || !path)
         e = OF_ERR_ARGUMENT;
-    else if ((e = of_io_read_all(path, &data, &size)) == OF_OK)
-        face = open_memory(ctx, data, size, face_index, 1, &e);
+    else if ((f = use_file(ctx, path, &e)) != NULL) {
+        face = open_memory(ctx, f->data, f->size, face_index, 0, &e);
+        if (face)
+            face->file = f;
+        else
+            release_file(ctx, f);
+    }
     if (error)
         *error = e;
     return face;
@@ -147,6 +210,8 @@ void of_face_close(OFFace *face)
     of_path_free(&face->path);
     if (face->owns_data)
         free(face->data);
+    if (face->file)
+        release_file(face->ctx, face->file);
     free(face);
 }
 
