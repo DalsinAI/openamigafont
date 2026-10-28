@@ -199,6 +199,9 @@ struct ScanArg {
     int incomplete;             /* a file of this folder could not be read */
 };
 
+static int ensure_coverage(OFIndex *ix);
+static void learn_coverage(OFIndex *ix, size_t i, OFFace *face);
+
 static int scan_file(const char *path, void *arg)
 {
     struct ScanArg *a = (struct ScanArg *)arg;
@@ -234,6 +237,15 @@ static int scan_file(const char *path, void *arg)
         if (add_entry(a->ix, &e) != OF_OK) {
             a->rc = OF_ERR_MEMORY;
             return 1;
+        }
+        /* its characters, for the index file: lookups then open only the
+         * faces that may have a character */
+        {
+            OFFace *face = of_face_open_index(a->ctx, path, face_index);
+            if (face) {
+                learn_coverage(a->ix, a->ix->count - 1, face);
+                of_face_close(face);
+            }
         }
         face_index++;
     }
@@ -372,6 +384,13 @@ int of_index_save(const OFIndex *ix, const char *path)
         put(&o, "\t", 1);
         puts_(&o, e->path);
         put(&o, "\n", 1);
+        /* the face's characters, by blocks of 256 */
+        if (i < ix->coverage_count && ix->coverage[i].has_blocks) {
+            put(&o, "R ", 2);
+            for (k = 0; k < (int)(OF_COVERAGE_BLOCKS / 32); ++k)
+                puthex(&o, ix->coverage[i].blocks[k]);
+            put(&o, "\n", 1);
+        }
     }
     /* the last line, with the count of F lines: a file cut short is refused */
     put(&o, "E ", 2);
@@ -434,7 +453,7 @@ int of_index_load(OFIndex *ix, const char *path)
     OFIndexDir dirs[OF_INDEX_MAX_DIRS];
     size_t ndirs = 0, i;
     uint32_t flines = 0;
-    int rc, ended = 0;
+    int rc, ended = 0, last_f = 0;
 
     if (!ix || !path)
         return OF_ERR_ARGUMENT;
@@ -464,6 +483,18 @@ int of_index_load(OFIndex *ix, const char *path)
         }
         if (line[0] == 'F')
             flines++;
+        if (line[0] == 'R') {
+            /* the blocks of the face on the F line just before */
+            uint32_t v[OF_COVERAGE_BLOCKS / 32];
+            if (last_f && gethex(line + 2, eol, v, OF_COVERAGE_BLOCKS / 32) && ensure_coverage(ix)) {
+                OFCoverage *c = &ix->coverage[ix->count - 1];
+                memcpy(c->blocks, v, sizeof c->blocks);
+                c->has_blocks = 1;
+            }
+            last_f = 0;
+            continue;
+        }
+        last_f = 0;
         if (line[0] == 'D' && ndirs < OF_INDEX_MAX_DIRS) {
             uint32_t v[4];
             const char *q = gethex(line + 2, eol, v, 4);
@@ -495,11 +526,13 @@ int of_index_load(OFIndex *ix, const char *path)
                 free(data);
                 return OF_ERR_MEMORY;
             }
+            last_f = 1;
         }
     }
     free(data);
     if (!ended) {
         /* cut short, or not ours: none of it counts */
+        drop_coverage(ix);
         ix->count = 0;
         return OF_ERR_CACHE;
     }
@@ -524,9 +557,23 @@ int of_index_load(OFIndex *ix, const char *path)
             int keep = 0;
             for (i = 0; i < ix->ndirs && !keep; ++i)
                 keep = entry_in_dir(&ix->entries[k], ix->dirs[i].path);
-            if (keep)
+            if (keep) {
+                if (k < ix->coverage_count) {
+                    OFCoverage c = ix->coverage[k];
+                    ix->coverage[k] = ix->coverage[w];
+                    ix->coverage[w] = c;
+                } else if (w < ix->coverage_count) {
+                    free(ix->coverage[w].ranges);
+                    memset(&ix->coverage[w], 0, sizeof ix->coverage[w]);
+                }
                 ix->entries[w++] = ix->entries[k];
+            }
         }
+        /* the coverage of entries left out is past the end now */
+        for (k = w; k < ix->coverage_count; ++k)
+            free(ix->coverage[k].ranges);
+        if (ix->coverage_count > w)
+            ix->coverage_count = w;
         ix->count = w;
     }
     return OF_OK;
@@ -728,39 +775,62 @@ static int covered(const OFCoverage *c, uint32_t codepoint)
     return 0;
 }
 
+/* One coverage for each entry, the new ones unknown. */
+static int ensure_coverage(OFIndex *ix)
+{
+    OFCoverage *c;
+    if (ix->coverage_count >= ix->count)
+        return 1;
+    c = (OFCoverage *)realloc(ix->coverage, ix->count * sizeof *c);
+    if (!c)
+        return 0;
+    memset(c + ix->coverage_count, 0, (ix->count - ix->coverage_count) * sizeof *c);
+    ix->coverage = c;
+    ix->coverage_count = ix->count;
+    return 1;
+}
+
 /* Keeps the characters face maps as entry i's coverage. */
 static void learn_coverage(OFIndex *ix, size_t i, OFFace *face)
 {
     OFCoverage *c;
-    size_t n;
-    if (!ix->coverage) {
-        ix->coverage = (OFCoverage *)calloc(ix->count, sizeof *ix->coverage);
-        if (!ix->coverage)
-            return;
-        ix->coverage_count = ix->count;
-    }
-    if (i >= ix->coverage_count)
+    size_t n, k;
+    if (!ensure_coverage(ix) || i >= ix->coverage_count)
         return;
     c = &ix->coverage[i];
     n = of_face_cmap_ranges(face, NULL, 0);
     if (!n || n > 0xFFFF)
         return;
+    free(c->ranges);
     c->ranges = (uint32_t *)malloc(n * 2 * sizeof(uint32_t));
     if (!c->ranges)
         return;
     c->count = (uint32_t)of_face_cmap_ranges(face, c->ranges, n);
     c->known = 1;
+    memset(c->blocks, 0, sizeof c->blocks);
+    for (k = 0; k < c->count; ++k) {
+        uint32_t b = c->ranges[2 * k] >> 8, last = c->ranges[2 * k + 1] >> 8;
+        for (; b <= last && b < OF_COVERAGE_BLOCKS; ++b)
+            c->blocks[b >> 5] |= 1u << (b & 31);
+    }
+    c->has_blocks = 1;
 }
 
-/* Entry e's face when it has the character. A face is opened (the whole
- * file read) only the first time, or when its coverage says it may have
- * it; characters below U+0100 always look, for Symbol fonts' stand-ins. */
+/* No character of the face in codepoint's block or ranges. */
+static int surely_missing(const OFCoverage *c, uint32_t codepoint)
+{
+    if (c->known)
+        return !covered(c, codepoint);
+    if (c->has_blocks && codepoint < OF_COVERAGE_LIMIT)
+        return !(c->blocks[codepoint >> 13] & (1u << ((codepoint >> 8) & 31)));
+    return 0;
+}
+
 static OFFace *open_if_has(OFIndex *ix, OFContext *ctx, const OFIndexEntry *e, uint32_t codepoint)
 {
     size_t i = (size_t)(e - ix->entries);
     OFFace *face;
-    if (codepoint >= 0x100 && i < ix->coverage_count && ix->coverage[i].known
-        && !covered(&ix->coverage[i], codepoint))
+    if (codepoint >= 0x100 && i < ix->coverage_count && surely_missing(&ix->coverage[i], codepoint))
         return NULL;
     face = of_face_open_index(ctx, e->path, e->face_index);
     if (!face)

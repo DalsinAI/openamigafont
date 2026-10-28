@@ -35,11 +35,20 @@ typedef struct OFIndexDir {
 
 /* The characters an entry's face maps, worked out the first time a
  * character lookup needs them, so later lookups open only faces that may
- * have the character. Kept in memory only. */
+ * have the character. The ranges are kept in memory only; the blocks are
+ * also kept in the index file. */
+/* The blocks are what the index file keeps of a face's characters: a
+ * lookup skips a face with none in the character's block without opening
+ * it. Characters from OF_COVERAGE_LIMIT on are always looked for. */
+#define OF_COVERAGE_LIMIT 0x40000u
+#define OF_COVERAGE_BLOCKS (OF_COVERAGE_LIMIT / 256)
+
 typedef struct OFCoverage {
     uint32_t *ranges;               /* [first, last] pairs, ascending */
     uint32_t count;
-    int known;
+    int known;                      /* ranges hold the face's characters */
+    int has_blocks;                 /* blocks hold them, 256 at a time */
+    uint32_t blocks[OF_COVERAGE_BLOCKS / 32]; /* a bit for each 256 characters below OF_COVERAGE_LIMIT with any */
 } OFCoverage;
 
 typedef struct OFIndex {
